@@ -1,0 +1,27 @@
+{
+  "name": "localpilot",
+  "version": "0.6.0",
+  "private": true,
+  "description": "Chrome side-panel browser agent driven by a local LLM API.",
+  "type": "module",
+  "scripts": {
+    "icons": "node scripts/make-icons.mjs",
+    "test": "node --test tests/unit/*.test.js",
+    "test:e2e": "node tests/e2e.mjs",
+    "mock": "node tests/mock-llm.mjs",
+    "test:e2e:boss": "node tests/e2e-boss.mjs",
+    "host:install": "node host/install.mjs",
+    "host:uninstall": "node host/install.mjs --uninstall",
+    "test:e2e:mcp": "node tests/e2e-mcp.mjs",
+    "test:all": "npm test && node tests/e2e.mjs && node tests/e2e-boss.mjs && node tests/e2e-mcp.mjs && node tests/e2e-resilience.mjs && node tests/e2e-phase-a.mjs && node tests/e2e-phase-b.mjs && node tests/e2e-phase-c.mjs && node tests/e2e-phase-d.mjs",
+    "test:e2e:resilience": "node tests/e2e-resilience.mjs",
+    "logs:summary": "node scripts/summarize-logs.mjs",
+    "test:e2e:phase-a": "node tests/e2e-phase-a.mjs",
+    "test:e2e:phase-b": "node tests/e2e-phase-b.mjs",
+    "test:e2e:phase-c": "node tests/e2e-phase-c.mjs",
+    "test:e2e:phase-d": "node tests/e2e-phase-d.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "1.58.2"
+  }
+}

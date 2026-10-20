@@ -1,0 +1,51 @@
+{
+  "manifest_version": 3,
+  "name": "LocalPilot",
+  "version": "0.6.0",
+  "description": "Browser agent in a side panel, powered by your local LLM API (Ollama, LM Studio, llama.cpp, vLLM, LiteLLM).",
+  "minimum_chrome_version": "116",
+  "action": {
+    "default_title": "Open LocalPilot"
+  },
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "options_page": "src/ui/options.html",
+  "commands": {
+    "toggle-side-panel": {
+      "description": "Open LocalPilot side panel",
+      "suggested_key": {
+        "default": "Alt+Shift+L",
+        "mac": "Alt+Shift+L"
+      }
+    }
+  },
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "tabs",
+    "scripting",
+    "debugger",
+    "activeTab",
+    "nativeMessaging",
+    "tabGroups",
+    "alarms",
+    "downloads",
+    "webNavigation",
+    "notifications"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "web_accessible_resources": [],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqfJh1hMRLoR/iV0mOcIc5o1YzGwajqqrZpky33UKxq+LxeodQwupRqmxE6VYHaVEAnUKEedDpqwps6rHw70G4WxUzbTFc/h+VYE0JqrNOGlEIwrSyxexmF9wByCxGkXdQRz3eYNkIkqZIbqh7zKR8NTMu1hMwTiRVplE66dFylXj47l5DGahf7Cxpq9hD+SJF+216J12vnrOoda8UeDseaRAVL/4/TBGP6Xe5cpE5uETrIeEE8UNZFlOOYZKIz2dzd43q10q4nEVlOSYwDpDa2k1l2PMLVPfcV8M+76iXQvf9mZWimoMslz5Oh7Jd9Bk2GHzU/SwVga9uTqYgQwrfQIDAQAB"
+}

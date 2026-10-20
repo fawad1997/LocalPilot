@@ -1,0 +1,25 @@
+# Dependencies (only needed for the tests)
+node_modules/
+
+# Secrets and private keys: never commit these
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+src/local-defaults.json
+host/extension-key.pem
+
+# Runtime data written by the extension and the PC bridge (may contain your browsing and job search data)
+logs/*.jsonl
+host/localpilot-host.log
+host/localpilot-host.bat
+host/com.localpilot.host.json
+bridge.json
+
+# Machine-specific files written by the installers and by your editor / Claude Code
+.claude/
+
+# Test output
+tests/*.png
+*.zip

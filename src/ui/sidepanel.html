@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LocalPilot</title>
+  <link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body>
+  <header class="bar">
+    <div class="brand">
+      <span class="dot" id="conn-dot" title="Model server status"></span>
+      <div>
+        <div class="title">LocalPilot <button type="button" class="pc-badge" id="pc-badge" title="PC bridge">PC: off</button></div>
+        <div class="model" id="model-label">…</div>
+        <div class="model" id="tab-label"></div>
+      </div>
+    </div>
+    <div class="actions">
+      <button type="button" id="toggle-help" class="icon" title="Help: setup, commands, what it can do" aria-label="Help" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.7M12 17h.01"/></svg>
+      </button>
+      <button type="button" id="toggle-tasks" class="icon" title="Saved tasks" aria-label="Saved tasks" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg>
+      </button>
+      <button type="button" id="new-chat" class="icon" title="New chat" aria-label="New chat">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <button type="button" id="open-settings" class="icon" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <section id="help" class="help" hidden aria-label="Help">
+    <div class="help-head"><strong>Help</strong> <small>Type <code>/</code> in the box below to see commands.</small></div>
+
+    <details id="help-setup" open>
+      <summary>Setup</summary>
+      <ul class="setup-list">
+        <li><span class="dot" id="help-model-dot"></span> <span id="help-model">Model server: checking…</span> <button type="button" data-open="settings">Settings</button></li>
+        <li><span class="dot" id="help-pc-dot"></span> <span id="help-pc">PC bridge: checking…</span></li>
+      </ul>
+      <div id="pc-steps" class="pc-steps" hidden>
+        <p>The PC bridge lets LocalPilot save files (CSV, notes) into your folders, run the job-board and application flows, and upload files from those folders. Attaching a file with the paperclip works without it.</p>
+        <ol>
+          <li>Install <a href="https://nodejs.org/" target="_blank" rel="noopener noreferrer">Node.js</a> 18 or newer, if you do not have it.</li>
+          <li>Open a terminal in the LocalPilot folder (the folder you picked in <em>chrome://extensions → Load unpacked</em>).</li>
+          <li>Run this command once:
+            <div class="cmd"><code id="install-cmd">node host/install.mjs</code><button type="button" data-copy="install-cmd">Copy</button></div>
+          </li>
+          <li>Reload LocalPilot: <button type="button" data-open="extensions">Open chrome://extensions</button> and press the reload arrow on LocalPilot.</li>
+          <li><button type="button" id="pc-recheck">Check again</button></li>
+        </ol>
+        <p class="hint">Folders it may use are set in <code>host/config.json</code>. To remove it later: <code>node host/install.mjs --uninstall</code>.</p>
+      </div>
+      <p class="hint" id="help-shortcut"></p>
+    </details>
+
+    <details open>
+      <summary>Commands</summary>
+      <ul class="cmd-list" id="help-commands"></ul>
+    </details>
+
+    <details>
+      <summary>Attach files</summary>
+      <p>Press the paperclip next to the box (or drop files on the panel) and send your message with them. LocalPilot can then:</p>
+      <ul>
+        <li>read text files (txt, csv, json, md…) and see images,</li>
+        <li>upload a file into a page's file field: <em>"Upload the attached CV to the resume field."</em></li>
+      </ul>
+      <p class="hint">Up to 15 MB per file. Attached files stay available until you start a new chat.</p>
+    </details>
+
+    <details open>
+      <summary>Things to try</summary>
+      <p class="hint">Click one to put it in the box, then edit it.</p>
+      <div id="help-examples" class="examples"></div>
+    </details>
+
+    <details>
+      <summary>Permission modes</summary>
+      <ul>
+        <li><strong>Ask once per site</strong>: asks the first time it acts on each website.</li>
+        <li><strong>Ask every action</strong>: asks before every click, typing or upload.</li>
+        <li><strong>Plan, then act</strong>: writes a plan first; you approve, edit or cancel it.</li>
+        <li><strong>Act without asking</strong>: never asks. Use only on sites you trust.</li>
+      </ul>
+      <p class="hint">Reading pages never needs approval. LocalPilot never solves CAPTCHAs and never types passwords or card numbers.</p>
+    </details>
+  </section>
+
+  <section id="tasks" class="tasks" hidden aria-label="Saved tasks">
+    <div class="tasks-head"><strong>Saved tasks</strong> <small>Run one by typing /name in the box below.</small></div>
+    <ul id="task-list" class="task-list"></ul>
+    <form id="task-form" class="task-form">
+      <input id="task-name" placeholder="name (for /name)" required maxlength="40" aria-label="Task name" />
+      <input id="task-url" placeholder="Start URL (optional)" aria-label="Start URL" />
+      <textarea id="task-prompt" rows="2" placeholder="What LocalPilot should do (not needed for a page watch)" aria-label="Task prompt"></textarea>
+      <label class="task-daily"><input type="checkbox" id="task-watch-on" /> Page watch, no AI: compare the start URL's text with the last run</label>
+      <input id="task-watch-selector" placeholder="Only this part of the page: CSS selector (optional)" aria-label="Watch selector" hidden />
+      <div class="task-daily task-sched">
+        <label>Run <select id="task-schedule" aria-label="Schedule">
+          <option value="off">only when I run it</option>
+          <option value="daily">every day at</option>
+          <option value="weekdays">on weekdays at</option>
+          <option value="interval">every</option>
+        </select></label>
+        <input type="time" id="task-daily" value="08:00" aria-label="Time" hidden />
+        <span id="task-interval-wrap" hidden><input type="number" id="task-interval" min="15" step="5" value="60" aria-label="Minutes" /> min</span>
+      </div>
+      <div class="task-daily task-sched">
+        <label>Notify <select id="task-notify" aria-label="Notify">
+          <option value="always">after every run</option>
+          <option value="change">only when the result changes</option>
+          <option value="keyword">only when it contains…</option>
+        </select></label>
+        <input id="task-keyword" placeholder="word" aria-label="Keyword" hidden />
+      </div>
+      <div class="task-actions">
+        <button type="button" id="task-use-tab">Use this tab's URL</button>
+        <button type="submit" class="primary">Save task</button>
+      </div>
+      <p id="task-error" class="task-error" hidden></p>
+    </form>
+  </section>
+
+  <main id="log" aria-live="polite">
+    <section class="empty" id="empty">
+      <h1>What should I do on this page?</h1>
+      <p>LocalPilot reads and controls the current tab using your local model.</p>
+      <p class="hint">New here? Press <button type="button" class="link" id="empty-help">Help</button> for setup, commands and examples, or type <code>/</code>.</p>
+      <p class="setup-hint" id="setup-hint" hidden></p>
+      <div class="suggestions">
+        <button type="button" class="chip">Summarize this page</button>
+        <button type="button" class="chip">Find the contact link and open it</button>
+        <button type="button" class="chip">List every form field on this page</button>
+      </div>
+    </section>
+  </main>
+
+  <div class="status" id="status" hidden></div>
+
+  <div class="controls">
+    <label class="picker" title="Permissions">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/></svg>
+      <select id="mode-select" aria-label="Permission mode">
+        <option value="ask_site">Ask once per site</option>
+        <option value="ask_action">Ask every action</option>
+        <option value="plan">Plan, then act</option>
+        <option value="auto">Act without asking</option>
+      </select>
+    </label>
+    <label class="picker" title="Model">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 9h6v6H9z"/></svg>
+      <select id="model-select" aria-label="Model"></select>
+    </label>
+  </div>
+
+  <div id="attach-list" class="attach-list" hidden aria-label="Attached files"></div>
+  <ul id="slash-menu" class="slash-menu" role="listbox" aria-label="Commands" hidden></ul>
+  <form id="composer" class="composer">
+    <button type="button" id="attach" class="attach" title="Attach files" aria-label="Attach files">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9"/></svg>
+    </button>
+    <input type="file" id="attach-input" multiple hidden />
+    <textarea id="prompt" rows="1" placeholder="Ask LocalPilot, or type / for commands" aria-label="Message" aria-autocomplete="list" aria-controls="slash-menu"></textarea>
+    <button type="submit" id="send" class="send" aria-label="Send">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+    </button>
+  </form>
+
+  <template id="approval-tpl">
+    <div class="approval">
+      <div class="approval-text"></div>
+      <div class="approval-actions">
+        <button type="button" data-decision="once" class="primary">Allow once</button>
+        <button type="button" data-decision="always">Always allow</button>
+        <button type="button" data-decision="deny" class="danger">Deny</button>
+      </div>
+    </div>
+  </template>
+
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>

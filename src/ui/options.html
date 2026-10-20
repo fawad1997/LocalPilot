@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LocalPilot Settings</title>
+  <link rel="stylesheet" href="sidepanel.css" />
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body class="options">
+  <main class="page">
+    <h1>LocalPilot settings</h1>
+
+    <section>
+      <h2>Model server</h2>
+      <label>Preset
+        <select id="preset">
+          <option value="">Custom</option>
+          <option value="freellmapi">FreeLLMAPI (127.0.0.1:31415)</option>
+          <option value="ollama">Ollama (localhost:11434)</option>
+          <option value="lmstudio">LM Studio (localhost:1234)</option>
+          <option value="llamacpp">llama.cpp server (localhost:8080)</option>
+          <option value="vllm">vLLM (localhost:8000)</option>
+          <option value="anthropic_compatible">Anthropic-compatible gateway (e.g. LiteLLM)</option>
+        </select>
+      </label>
+      <label>API format
+        <select id="provider">
+          <option value="openai">OpenAI-compatible (/chat/completions)</option>
+          <option value="anthropic">Anthropic-compatible (/v1/messages)</option>
+        </select>
+      </label>
+      <label>Base URL
+        <input id="baseUrl" type="url" placeholder="http://localhost:11434/v1" spellcheck="false" />
+      </label>
+      <label>Model
+        <span class="row">
+          <input id="model" list="models" placeholder="qwen2.5vl:7b" spellcheck="false" />
+          <button type="button" id="test">Test &amp; list models</button>
+        </span>
+        <datalist id="models"></datalist>
+      </label>
+      <p class="hint" id="test-result" role="status"></p>
+      <label>API key (optional)
+        <span class="row">
+          <input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Only if your server requires one" />
+          <button type="button" id="toggle-key">Show</button>
+        </span>
+      </label>
+    </section>
+
+    <section>
+      <h2>Agent</h2>
+      <label>Max steps per message <input id="maxSteps" type="number" min="1" max="200" /></label>
+      <label>Retries per model call (5xx, 429, timeouts) <input id="maxRetries" type="number" min="0" max="10" /></label>
+      <label>Model request timeout (seconds) <input id="requestTimeoutSec" type="number" min="10" max="900" /></label>
+      <label>Fallback models (comma-separated, tried after the main model keeps failing)
+        <input id="fallbackModels" list="models" placeholder="e.g. glm-5.3-flash, claude-haiku-4-5" spellcheck="false" />
+      </label>
+      <label>Max tokens per reply <input id="maxTokens" type="number" min="256" max="65536" /></label>
+      <label>Temperature <input id="temperature" type="number" min="0" max="2" step="0.1" /></label>
+      <label>Screenshot width (px) <input id="screenshotMaxWidth" type="number" min="320" max="2560" step="10" /></label>
+      <label class="check"><input id="sendScreenshots" type="checkbox" /> Send screenshots to the model (turn off for text-only models)</label>
+      <label class="check"><input id="streaming" type="checkbox" /> Stream replies as they are generated (OpenAI-style servers; falls back if unsupported)</label>
+      <label>Summarize older turns when the prompt exceeds (tokens, 0 = never) <input id="summarizeAfterTokens" type="number" min="0" max="1000000" step="1000" /></label>
+      <label>Permissions
+        <select id="permissionMode">
+          <option value="ask_site">Ask once per site</option>
+          <option value="ask_action">Ask before every action</option>
+          <option value="plan">Plan, then act (approve or edit a step plan first)</option>
+          <option value="auto">Act without asking (bypass permissions)</option>
+        </select>
+      </label>
+      <label class="check"><input id="screenshotMarks" type="checkbox" /> Number clickable elements on screenshots (helps small vision models click accurately)</label>
+      <label class="check"><input id="pauseOnBotCheck" type="checkbox" /> Pause and hand over to me when a CAPTCHA or bot check appears</label>
+      <label class="check"><input id="logging" type="checkbox" /> Write diagnostic logs to the extension's logs folder (needs the PC bridge)</label>
+      <label class="check"><input id="mcpBridge" type="checkbox" /> Let Claude Code / MCP clients drive this browser (needs the PC bridge; reload the extension after changing)</label>
+      <label class="check"><input id="allowJavascriptTool" type="checkbox" /> Enable the javascript_tool (runs model-written code in pages)</label>
+      <label>Extra instructions
+        <textarea id="extraSystemPrompt" rows="4" placeholder="Added to the system prompt"></textarea>
+      </label>
+    </section>
+
+    <section>
+      <h2>Quantara (trading bot)</h2>
+      <p class="hint">Lets the agent read your local Quantara dashboard (status, trades, why it isn't trading, sessions, research). It never places trades or changes settings.</p>
+      <label class="check"><input id="quantaraEnabled" type="checkbox" /> Give the agent the Quantara tools</label>
+      <label>Dashboard URL (this PC only)
+        <span class="row">
+          <input id="quantaraUrl" type="url" placeholder="http://127.0.0.1:8787" spellcheck="false" />
+          <button type="button" id="quantara-test">Test</button>
+        </span>
+      </label>
+      <p class="hint" id="quantara-result" role="status"></p>
+      <label>Dashboard token (optional: DASHBOARD_TOKEN from Quantara's .env)
+        <input id="quantaraToken" type="password" autocomplete="off" spellcheck="false" placeholder="Only needed for the emergency-stop tool" />
+      </label>
+      <label>News feeds for <code>news_collect</code> (RSS/Atom, one per line; empty = Fed, ECB, FXStreet, Investing.com)
+        <textarea id="newsFeeds" rows="3" spellcheck="false" placeholder="https://www.federalreserve.gov/feeds/press_all.xml"></textarea>
+      </label>
+      <p class="hint">With a token, the agent also gets <code>quantara_halt</code> (emergency stop: no new entries). You confirm it every time; it is never run by schedules or MCP clients, and resuming stays on Quantara's dashboard.</p>
+    </section>
+
+    <section>
+      <h2>Site notes</h2>
+      <p class="hint">Short notes the agent saved about websites (<code>site_note</code>). It sees a site's notes whenever it works on that site. Removing one takes effect immediately.</p>
+      <ul id="site-notes" class="domains"></ul>
+    </section>
+
+    <section>
+      <h2>Always-allowed sites</h2>
+      <ul id="domains" class="domains"></ul>
+    </section>
+
+    <div class="footer">
+      <button type="button" id="save" class="primary">Save</button>
+      <span id="saved" class="hint" role="status"></span>
+    </div>
+  </main>
+  <script type="module" src="options.js"></script>
+</body>
+</html>
