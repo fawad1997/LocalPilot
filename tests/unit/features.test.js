@@ -174,3 +174,11 @@ test('extract_list: rows are de-duplicated by link, else by content', () => {
   assert.deepEqual(listColumns([{ text10: 1, link: 2, text2: 3, title: 4, extra: 5 }]), ['title', 'link', 'text2', 'text10', 'extra']);
   assert.deepEqual(listColumns([{ b: 1, a: 2 }], { a: 'x', b: 'y' }), ['a', 'b']);
 });
+
+test('tool calls from small models: leaked format tokens and bare actions are mapped', async () => {
+  const { normalizeToolCall } = await import('../../src/tools.js');
+  assert.deepEqual(normalizeToolCall('wait<|channel|>commentary', { duration: 3 }), { name: 'computer', input: { duration: 3, action: 'wait' } });
+  assert.deepEqual(normalizeToolCall('wait_for', { selector: 'h1' }), { name: 'computer', input: { selector: 'h1', action: 'wait_for' } });
+  assert.deepEqual(normalizeToolCall('click', { ref: 'ref_2' }), { name: 'computer', input: { ref: 'ref_2', action: 'left_click' } });
+  assert.deepEqual(normalizeToolCall('navigate', { url: 'x' }), { name: 'navigate', input: { url: 'x' } });
+});

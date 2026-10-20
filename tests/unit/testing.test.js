@@ -54,7 +54,7 @@ test('recorder: captions, which actions are recorded, frame cap, file names', ()
   assert.equal(rec.recordsAfter('computer', { action: 'screenshot' }), false);
   assert.equal(rec.recordsAfter('computer', { action: 'scroll' }), true);
   assert.equal(rec.recordsAfter('read_page', {}), false);
-  assert.equal(rec.recordsAfter('extract_list', { pages: 3 }), true);
+  assert.equal(rec.recordsAfter('extract_list', { pages: 3 }), false, 'extract_list records each page itself');
   const r = { frames: [] };
   for (let i = 0; i < rec.MAX_FRAMES + 5; i += 1) rec.addFrame(r, { action: `a${i}` });
   assert.equal(r.frames.length, rec.MAX_FRAMES);
@@ -63,4 +63,10 @@ test('recorder: captions, which actions are recorded, frame cap, file names', ()
   assert.equal(rec.safeFileName('https://shop.test/a b?c=1'), 'shop.test-a-b-c-1');
   assert.equal(rec.toBase64('hé'), Buffer.from('hé').toString('base64'));
   assert.match(rec.stamp(new Date(2026, 9, 20, 9, 5, 7)), /^2026-10-20_090507$/);
+});
+
+test('recorder: form captions use the field label', () => {
+  assert.equal(rec.describeAction('form_input', { ref: 'ref_3', value: 'jane@example.com' }, 'E-mail address'), 'Fill "E-mail address" with "jane@example.com"');
+  assert.equal(rec.describeAction('form_input', { ref: 'ref_9', value: true }, 'Mushroom'), 'Tick "Mushroom"');
+  assert.equal(rec.describeAction('form_input', { ref: 'ref_2', value: 'x' }), 'Fill ref_2 with "x"');
 });

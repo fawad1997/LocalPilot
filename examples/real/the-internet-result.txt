@@ -1,0 +1,9 @@
+Tested 1 page(s) on https://the-internet.herokuapp.com in 11 s and checked 3 link(s): 5 error(s), 2 warning(s), 0 note(s).
+Problems (most serious first):
+- [error] Broken image: Image did not load: https://the-internet.herokuapp.com/asdf.jpg <img> "asdf.jpg" — https://the-internet.herokuapp.com/broken_images
+- [error] Broken image: Image did not load: https://the-internet.herokuapp.com/hjkl.jpg <img> "hjkl.jpg" — https://the-internet.herokuapp.com/broken_images
+- [error] Failed request: GET https://the-internet.herokuapp.com/asdf.jpg → 404 — https://the-internet.herokuapp.com/broken_images
+- [error] Failed request: GET https://the-internet.herokuapp.com/hjkl.jpg → 404 — https://the-internet.herokuapp.com/broken_images
+- [error] Failed request: GET https://298279967.log.optimizely.com/event?a=298279967&d=298279967&y=false&n=https%3A%2F%2Fthe-internet.herokuapp.com%2Fbroken_images&u=oeu1792478700813r0.16814135707386169&wxhr=true&t=1792479019427&f → net::ERR_NAME_NOT_RESOLVED — https://the-internet.herokuapp.com/broken_images
+- [warning] Image without alt text: Image has no alt attribute: https://the-internet.herokuapp.com/img/avatar-blank.jpg <img> "img/avatar-blank.jpg" — https://the-internet.herokuapp.com/broken_images
+- [warning] No main heading (h1): No visible <h1> heading — https://the-internet.herokuapp.com/broken_images

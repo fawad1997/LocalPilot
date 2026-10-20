@@ -200,7 +200,9 @@
     el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
     const r = el.getBoundingClientRect();
     // What a person would call the element (for recording captions such as: Click "Add to cart").
-    const label = (el.innerText || el.getAttribute('aria-label') || el.value || el.placeholder || el.title || el.alt || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+    const field = /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName);
+    const label = ((field ? el.labels?.[0]?.innerText || el.getAttribute('aria-label') || el.placeholder || el.name : '')
+      || el.innerText || el.getAttribute('aria-label') || el.value || el.placeholder || el.title || el.alt || '').replace(/[\s:]+$/, '').replace(/\s+/g, ' ').trim().slice(0, 60);
     return { x: r.left + r.width / 2, y: r.top + r.height / 2, width: r.width, height: r.height, label };
   }
 
@@ -328,7 +330,9 @@
   function autoRow(item) {
     const row = {};
     const heading = item.querySelector('h1, h2, h3, h4, h5, h6, [role="heading"], strong, b');
-    const link = item.matches('a[href]') ? item : item.querySelector('a[href]');
+    // The first link with real text (not an icon such as an up-vote arrow).
+    const links = [...(item.matches('a[href]') ? [item] : []), ...item.querySelectorAll('a[href]')];
+    const link = links.find((a) => visibleText(a).length > 2) || links[0];
     row.title = visibleText(heading || link || item).slice(0, 300);
     if (link) row.link = absUrl(link.getAttribute('href'));
     const seen = new Set([row.title]);

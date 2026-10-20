@@ -43,7 +43,8 @@ export function describeAction(name, input = {}, label = '') {
     case 'switch_tab':
       return `Switch to tab ${input.tab_id}`;
     case 'form_input':
-      return `Fill ${input.ref} with "${clip(input.value, 40)}"`;
+      if (typeof input.value === 'boolean') return `${input.value ? 'Tick' : 'Untick'} ${label ? `"${clip(label, 50)}"` : input.ref}`;
+      return `Fill ${label ? `"${clip(label, 50)}"` : input.ref} with "${clip(input.value, 40)}"`;
     case 'file_upload':
       return `Upload ${clip(input.attachment || input.path, 50)}`;
     case 'handle_dialog':
@@ -70,7 +71,7 @@ export function describeAction(name, input = {}, label = '') {
 // Tools after which a frame is captured while recording.
 export function recordsAfter(name, input = {}) {
   if (['navigate', 'tabs_create', 'switch_tab', 'form_input', 'file_upload', 'handle_dialog'].includes(name)) return true;
-  if (name === 'extract_list') return Number(input.pages) > 1;
+  // extract_list records a frame per page itself.
   return name === 'computer' && ['left_click', 'right_click', 'double_click', 'triple_click', 'type', 'key', 'scroll', 'left_click_drag'].includes(input.action);
 }
 
@@ -177,12 +178,24 @@ export async function composeFrames(rec, { width = 800, delayMs = 1400 } = {}) {
   out.push({ rgba: g.getImageData(0, 0, width, height).data, delayMs: 1800 });
   for (const [i, f] of rec.frames.entries()) {
     const bmp = await decodeJpeg(f.jpeg);
-    g.fillStyle = '#ffffff';
-    g.fillRect(0, 0, width, imgH);
-    const drawH = Math.round((bmp.height * width) / bmp.width);
-    g.drawImage(bmp, 0, 0, width, Math.min(drawH, imgH)); // same-size viewports; taller ones are cropped
+    if (f.phone) {
+      // Phone screenshots keep their shape: centred, full height, like a phone on a desk.
+      g.fillStyle = '#e2e8f0';
+      g.fillRect(0, 0, width, imgH);
+      const h = imgH - 24;
+      const w = Math.round((bmp.width * h) / bmp.height);
+      const x = Math.round((width - w) / 2);
+      g.fillStyle = '#0f172a';
+      g.fillRect(x - 6, 6, w + 12, h + 12);
+      g.drawImage(bmp, x, 12, w, h);
+    } else {
+      g.fillStyle = '#ffffff';
+      g.fillRect(0, 0, width, imgH);
+      const drawH = Math.round((bmp.height * width) / bmp.width);
+      g.drawImage(bmp, 0, 0, width, Math.min(drawH, imgH)); // same-size viewports; taller ones are cropped
+    }
     bmp.close();
-    if (f.point && f.cssW) drawMarker(g, (f.point[0] * width) / f.cssW, (f.point[1] * width) / f.cssW);
+    if (f.point && f.cssW && !f.phone) drawMarker(g, (f.point[0] * width) / f.cssW, (f.point[1] * width) / f.cssW);
     drawBar(g, width, height, i + 1, f.action || 'Page', f.note || f.url || '');
     out.push({ rgba: g.getImageData(0, 0, width, height).data, delayMs: i === rec.frames.length - 1 ? 3000 : f.delayMs || delayMs });
   }

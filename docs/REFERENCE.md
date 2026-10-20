@@ -132,7 +132,7 @@ Windows (PowerShell), Ollama origins:
 setx OLLAMA_ORIGINS "chrome-extension://*"
 ```
 
-**Models.** Use a model that supports tool calling. A vision model also lets the agent read screenshots: for example `qwen2.5vl`, `qwen3-vl`, `gemma3`, `llama3.2-vision` or `mistral-small3.1`. With a text-only model, turn off **Send screenshots**. The agent can still work from `read_page`, `find` and `get_page_text`. If a model writes `<tool_call>{…}</tool_call>` as text instead of using native tool calls, LocalPilot parses that too.
+**Models.** Use a model that supports tool calling. A vision model also lets the agent read screenshots: for example `qwen2.5vl`, `qwen3-vl`, `gemma3`, `llama3.2-vision` or `mistral-small3.1`. With a text-only model, turn off **Send screenshots**. The agent can still work from `read_page`, `find` and `get_page_text`. If a model writes `<tool_call>{…}</tool_call>` as text instead of using native tool calls, LocalPilot parses that too. It also repairs two common slips of small models: chat-format tokens leaking into the tool name (`wait<|channel|>commentary`) are dropped, and a computer action called as if it were a tool (`wait_for`, `scroll`, `click`) becomes the matching `computer` call.
 
 ## PC bridge (files + scripts)
 
@@ -409,7 +409,7 @@ src/sitetest.js         testing mode (test_website): page audit, phone check, li
 src/recorder.js         GIF recording: frames, captions, click markers, saving through chrome.downloads
 src/gif.js              GIF89a encoder (median-cut palette + LZW)
 src/ui/report.html      shows the latest test report in a tab
-examples/               demos and prompts; examples/demo is made by `npm run demo`
+examples/               demos and prompts: real/ (recorded in Chrome), demo-ai/ (`npm run demo:ai`), demo/ (`npm run demo`)
 host/jobs-scripts/      scripts installed into the Jobs folder (log-application.mjs)
 src/tools.js            tool schemas and executors (CDP input, screenshots, page scripts)
 src/cdp.js              chrome.debugger attach/release, per-tab store (console, network, captures, dialogs), input
@@ -433,7 +433,8 @@ npm run test:e2e:phase-b     # smart wait, wait_for, marks, iframes, upload, dow
 npm run test:e2e:phase-c     # recipe registry, mock Liepin/51job/Zhaopin/LinkedIn + dedup, apply_assist, saved tasks + alarm, plan mode, summaries, streaming, Help + "/" menu + attached-file upload
 npm run test:e2e:phase-d     # mock Quantara (status, analysis, halt asks every time), interval/weekday schedules, no-AI page watch, extract_list paging, calendar (page data + table, UTC self-check), news feeds, site notes
 npm run test:e2e:phase-e     # testing mode on a buggy mock shop (every check, logout never opened, report + GIF), gif_recorder, record every run, /test and /record
-npm run demo                 # regenerate examples/demo (books.toscrape.com needs internet; --offline for the demo shop only)
+npm run demo                 # regenerate examples/demo: the buggy demo shop (offline, no model)
+npm run demo:ai              # regenerate examples/demo-ai: LocalPilot's agent with your model on real sites (model from src/local-defaults.json or LP_BASE_URL / LP_MODEL / LP_API_KEY)
 npm run test:all       # everything
 npm run mock        # standalone mock model on http://127.0.0.1:11999/v1 (test page at /page)
 ```

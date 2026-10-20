@@ -1,0 +1,33 @@
+Tested 4 page(s) on https://www.w3.org in 31 s and checked 20 link(s): 6 error(s), 128 warning(s), 3 note(s).
+Problems (most serious first):
+- [error] Broken image: Image did not load: https://www.w3.org/WAI/demos/bad/before/.img/marker2_w.gif <img> ".img/marker2_w.gif" — https://www.w3.org/WAI/demos/bad/before/home.html
+- [error] Broken image: Image did not load: https://www.w3.org/WAI/demos/bad/before/.img/marker2_w.gif <img> ".img/marker2_w.gif" — https://www.w3.org/WAI/demos/bad/before/news.html
+- [error] Failed request: GET https://www.w3.org/analytics/piwik/piwik.js → 404 — https://www.w3.org/WAI/demos/bad/before/home.html
+- [error] Failed request: GET https://www.w3.org/analytics/piwik/piwik.js → 404 — https://www.w3.org/WAI/demos/bad/before/reports/home.html
+- [error] Failed request: GET https://www.w3.org/analytics/piwik/piwik.js → 404 — https://www.w3.org/WAI/demos/bad/before/annotated/home.html
+- [error] Failed request: GET https://www.w3.org/analytics/piwik/piwik.js → 404 — https://www.w3.org/WAI/demos/bad/before/news.html
+- [warning] Link without text: Link to javascript:location.href='home.html'; has no text <a> — https://www.w3.org/WAI/demos/bad/before/home.html
+- [warning] Link without text: Link to javascript:location.href='news.html'; has no text <a> — https://www.w3.org/WAI/demos/bad/before/home.html
+- [warning] Link without text: Link to javascript:location.href='tickets.html'; has no text <a> — https://www.w3.org/WAI/demos/bad/before/home.html
+- [warning] Link without text: Link to javascript:location.href='survey.html'; has no text <a> — https://www.w3.org/WAI/demos/bad/before/home.html
+- [warning] Link without text: Link to news.html has no text <a> — https://www.w3.org/WAI/demos/bad/before/home.html
+- [warning] Link without text: Link to news.html has no text <a> — https://www.w3.org/WAI/demos/bad/before/home.html
+- [warning] Link without text: Link to news.html has no text <a> — https://www.w3.org/WAI/demos/bad/before/home.html
+- [warning] Link without text: Link to javascript:location.href='home.html'; has no text <a> — https://www.w3.org/WAI/demos/bad/before/annotated/home.html
+- [warning] Link without text: Link to javascript:location.href='news.html'; has no text <a> — https://www.w3.org/WAI/demos/bad/before/annotated/home.html
+- [warning] Link without text: Link to javascript:location.href='tickets.html'; has no text <a> — https://www.w3.org/WAI/demos/bad/before/annotated/home.html
+- [warning] Link without text: Link to javascript:location.href='survey.html'; has no text <a> — https://www.w3.org/WAI/demos/bad/before/annotated/home.html
+- [warning] Link without text: Link to ../news/annotations has no text <a> — https://www.w3.org/WAI/demos/bad/before/annotated/home.html
+- [warning] Link without text: Link to ../news/annotations has no text <a> — https://www.w3.org/WAI/demos/bad/before/annotated/home.html
+- [warning] Link without text: Link to ../news/annotations has no text <a> — https://www.w3.org/WAI/demos/bad/before/annotated/home.html
+- [warning] Link without text: Link to javascript:location.href='home.html'; has no text <a> — https://www.w3.org/WAI/demos/bad/before/news.html
+- [warning] Link without text: Link to javascript:location.href='news.html'; has no text <a> — https://www.w3.org/WAI/demos/bad/before/news.html
+- [warning] Link without text: Link to javascript:location.href='tickets.html'; has no text <a> — https://www.w3.org/WAI/demos/bad/before/news.html
+- [warning] Link without text: Link to javascript:location.href='survey.html'; has no text <a> — https://www.w3.org/WAI/demos/bad/before/news.html
+- [warning] Image without alt text (×25): Image has no alt attribute: https://www.w3.org/WAI/demos/bad/before/img/border_left_top.gif <img> "./img/border_left_top.gif" — https://www.w3.org/WAI/demos/bad/before/home.html
+- [warning] Image without alt text: Image has no alt attribute: https://www.w3.org/WAI/demos/bad/before/img/border_top.gif <img> "./img/border_top.gif" — https://www.w3.org/WAI/demos/bad/before/home.html
+- [warning] Image without alt text: Image has no alt attribute: https://www.w3.org/WAI/demos/bad/before/img/border_right_top.gif <img> "./img/border_right_top.gif" — https://www.w3.org/WAI/demos/bad/before/home.html
+- [warning] Image without alt text: Image has no alt attribute: https://www.w3.org/WAI/demos/bad/before/img/border_left.gif <img> "./img/border_left.gif" — https://www.w3.org/WAI/demos/bad/before/home.html
+- [warning] Image without alt text: Image has no alt attribute: https://www.w3.org/WAI/demos/bad/before/img/top_logo_next_end.gif <img> "./img/top_logo_next_end.gif" — https://www.w3.org/WAI/demos/bad/before/home.html
+- [warning] Image without alt text: Image has no alt attribute: https://www.w3.org/WAI/demos/bad/before/img/top_weather.gif <img> "./img/top_weather.gif" — https://www.w3.org/WAI/demos/bad/before/home.html
+…and 28 more in the report.

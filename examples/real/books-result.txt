@@ -1,7 +1,6 @@
-Tested 4 page(s) on https://books.toscrape.com in 23 s and checked 30 link(s): 4 error(s), 1 warning(s), 0 note(s).
+Tested 4 page(s) on https://books.toscrape.com in 33 s and checked 30 link(s): 4 error(s), 0 warning(s), 0 note(s).
 Problems (most serious first):
 - [error] Insecure (http) content on an https page: Insecure resource: http://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js <script> "http://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min" — https://books.toscrape.com/
 - [error] Insecure (http) content on an https page: Insecure resource: http://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js <script> "http://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min" — https://books.toscrape.com/catalogue/category/books_1/index.html
 - [error] Insecure (http) content on an https page: Insecure resource: http://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js <script> "http://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min" — https://books.toscrape.com/catalogue/category/books/travel_2/index.html
 - [error] Insecure (http) content on an https page: Insecure resource: http://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js <script> "http://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min" — https://books.toscrape.com/catalogue/category/books/mystery_3/index.html
-- [warning] Slow page: Loaded in 3.5 s — https://books.toscrape.com/catalogue/category/books/travel_2/index.html

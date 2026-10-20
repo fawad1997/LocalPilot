@@ -1,12 +1,13 @@
 {
   "name": "localpilot",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "private": true,
   "description": "Chrome side-panel browser agent driven by a local LLM API.",
   "type": "module",
   "scripts": {
     "icons": "node scripts/make-icons.mjs",
     "demo": "node scripts/make-demo.mjs",
+    "demo:ai": "node scripts/make-ai-demo.mjs",
     "test": "node --test tests/unit/*.test.js",
     "test:e2e": "node tests/e2e.mjs",
     "mock": "node tests/mock-llm.mjs",

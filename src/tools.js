@@ -722,7 +722,25 @@ function pendingDialogText(d) {
   return `A ${kind} dialog is open: "${d.message}"${d.type === 'prompt' ? ` (default: "${d.defaultPrompt || ''}")` : ''}. The page is blocked until you call handle_dialog (accept true/false). It is dismissed automatically after 60 s.`;
 }
 
-export async function runTool(ctx, name, input = {}) {
+const COMPUTER_ACTIONS = new Set(['screenshot', 'left_click', 'right_click', 'double_click', 'triple_click', 'hover', 'left_click_drag', 'type', 'key', 'scroll', 'scroll_to', 'wait', 'wait_for', 'zoom']);
+
+// Small local models sometimes leak chat-format tokens into the tool name ("wait<|channel|>commentary")
+// or call a computer action as if it were a tool ("wait_for", "scroll"). Map those to the real call.
+export function normalizeToolCall(name, input = {}) {
+  let n = String(name || '').replace(/<\|.*$/s, '').trim();
+  let args = input && typeof input === 'object' ? input : {};
+  if (COMPUTER_ACTIONS.has(n)) {
+    args = { ...args, action: n };
+    n = 'computer';
+  } else if (n === 'click') {
+    args = { ...args, action: 'left_click' };
+    n = 'computer';
+  }
+  return { name: n, input: args };
+}
+
+export async function runTool(ctx, rawName, rawInput = {}) {
+  const { name, input } = normalizeToolCall(rawName, rawInput);
   if (TABLESS.has(name)) {
     await checkApproval(ctx, name, input);
     return runToolInner(ctx, name, input);
@@ -777,6 +795,7 @@ async function runToolInner(ctx, name, input) {
     }
     case 'form_input': {
       const { frameId, ref } = parseRef(input.ref);
+      if (ctx.recording) ctx.lastLabel = (await locateRef(ctx.tabId, input.ref).catch(() => null))?.label; // caption: Fill "E-mail address"
       const res = await callFrame(ctx.tabId, frameId, 'setValue', ref, input.value);
       if (res?.needsMainWorld) return [text(await setValueMainWorld(ctx.tabId, res.nonce, input.ref, input.value, frameId))];
       return [text(String(res).replace(ref, input.ref))];
@@ -927,6 +946,7 @@ async function extractList(ctx, input) {
     }
     read = page;
     const added = mergeRows(rows, seen, batch);
+    if (ctx.recording) await recordFrame(ctx, `Read list page ${page}: ${rows.length} row${rows.length === 1 ? '' : 's'} so far`);
     if (page > 1 && !added) {
       notes.push(`page ${page} had no new rows, so paging stopped`);
       break;
@@ -964,6 +984,9 @@ export async function recordFrame(ctx, action) {
   const rec = ctx.recording;
   if (!rec) return;
   try {
+    // A click on a link may start loading only after the action returned: show the page it led to.
+    await sleep(400);
+    if ((await tabInfo(ctx.tabId).catch(() => null))?.status === 'loading') await settle(ctx.tabId, 8000);
     const shot = await screenshot(ctx, { record: true });
     const tab = await tabInfo(ctx.tabId).catch(() => null);
     const note = String(ctx.stepNote || '').replace(/\s+/g, ' ').trim();

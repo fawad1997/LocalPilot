@@ -1,9 +1,7 @@
-// Builds the files in examples/demo/ by running LocalPilot's own tools in Chromium:
-//   1. test_website on a deliberately buggy local shop (every check fires) -> report + GIF
-//   2. test_website on https://books.toscrape.com (a public site made for scraping practice)
-//   3. gif_recorder: browse books.toscrape.com (category -> book -> scroll) -> GIF
-//   4. extract_list: the book list as CSV
-// No model is needed: the tools are called directly. Run: npm run demo   (needs internet for 2-4)
+// Builds examples/demo/: test_website on a deliberately buggy shop served on this PC, so every
+// check in the testing mode fires. Runs offline, with no AI model (the tool is called directly).
+// The real-website demos are in examples/real (recorded in Chrome) and examples/demo-ai
+// (LocalPilot's own agent with your model: npm run demo:ai). Run: npm run demo
 import { chromium } from 'playwright-core';
 import http from 'node:http';
 import os from 'node:os';
@@ -15,7 +13,6 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(root, 'examples', 'demo');
 fs.mkdirSync(out, { recursive: true });
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'localpilot-demo-'));
-const offline = process.argv.includes('--offline');
 
 // --- the buggy shop ---
 const page = (title, body, head = '') => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title>
@@ -103,41 +100,6 @@ try {
   copy(after(text, 'GIF'), 'buggy-shop-test.gif');
   await shootReport(path.join(out, 'buggy-shop-report.html'), 'buggy-shop-report.png');
 
-  if (!offline) {
-    const books = 'https://books.toscrape.com/';
-    console.log('2. Testing books.toscrape.com…');
-    await tab.goto(books);
-    const booksTab = await tabIdOf(books);
-    text = await tool(booksTab, 'test_website', { max_pages: 4, check_links: 30 });
-    fs.writeFileSync(path.join(out, 'books-result.txt'), `${text.replace(/\n(Report|GIF): .*/g, '').replace(/\nThe report is open in a new tab\./, '')}\n`);
-    copy(after(text, 'Report'), 'books-report.html');
-    copy(after(text, 'GIF'), 'books-test.gif');
-    await shootReport(path.join(out, 'books-report.html'), 'books-report.png');
-
-    console.log('3. Recording a browse on books.toscrape.com…');
-    await tool(booksTab, 'navigate', { url: books });
-    await tool(booksTab, 'gif_recorder', { action: 'start', title: 'Find a travel book on books.toscrape.com' });
-    const click = async (query) => {
-      const found = await tool(booksTab, 'find', { query });
-      // The link itself, not a container whose text also contains the words.
-      const ref = found.split('\n').find((l) => /\blink\b/.test(l) && l.includes(query))?.match(/\[(ref_\d+)\]/)?.[1];
-      if (!ref) throw new Error(`no element for "${query}"`);
-      await tool(booksTab, 'computer', { action: 'left_click', ref });
-    };
-    await click('Travel');
-    await tool(booksTab, 'computer', { action: 'scroll', scroll_direction: 'down', scroll_amount: 4 });
-    await click('Himalayas');
-    await tool(booksTab, 'computer', { action: 'scroll', scroll_direction: 'down', scroll_amount: 3 });
-    const exported = await tool(booksTab, 'gif_recorder', { action: 'export', filename: 'books-browse' });
-    copy(exported.match(/\) to (.+)\.$/)[1], 'books-browse.gif');
-
-    console.log('4. Extracting the book list…');
-    await tool(booksTab, 'navigate', { url: books });
-    const rows = JSON.parse((await tool(booksTab, 'extract_list', { action: 'extract', list: 'ol.row > li', fields: { title: 'h3 a@title', price: '.price_color', availability: '.availability', link: 'h3 a@href' }, max_rows: 20 })).replace(/^[^\n]*\n/, ''));
-    const cell = (v) => (/[",\n]/.test(v) ? `"${String(v).replace(/"/g, '""')}"` : v);
-    fs.writeFileSync(path.join(out, 'books.csv'), `title,price,availability,link\n${rows.map((r) => [r.title, r.price, r.availability, r.link].map(cell).join(',')).join('\n')}\n`);
-    console.log(`  wrote examples/demo/books.csv (${rows.length} rows)`);
-  }
   console.log('Done.');
 } finally {
   await context.close().catch(() => {});

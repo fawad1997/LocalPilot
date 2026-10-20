@@ -4,9 +4,11 @@ LocalPilot is a Chrome extension that lets an AI assistant use your browser for 
 
 The important part: the AI runs **on your own computer** (a "local LLM"), so your pages and chats do not go to a cloud service. There is no account and no telemetry.
 
-![LocalPilot testing a website: each page is checked on desktop and phone, and problems are outlined in red](examples/demo/buggy-shop-test.gif)
+![LocalPilot's AI finds the cheapest travel book on a real website, step by step](examples/demo-ai/books.gif)
 
-**See what it can do:** [examples and demos](examples/README.md): testing a website for bugs, GIF recordings, turning a page into a spreadsheet, and prompts to copy.
+*Above: LocalPilot's AI answering "Find the cheapest book in the Travel category on this site" on books.toscrape.com, recorded as a GIF. It answered £23.21, which is correct.*
+
+**See what it can do:** [examples on real websites](examples/README.md): the AI doing tasks by itself, testing websites for bugs, recordings, turning a page into a spreadsheet, and prompts to copy.
 
 > **New to this?** Follow the steps in order. You will need about 30 minutes the first time. Nothing here changes your computer's security settings, and you can remove everything by deleting the folder and the extension.
 
@@ -186,6 +188,8 @@ LocalPilot can read the status of a local trading bot and collect economic calen
 npm install          # test tools only
 npm test             # unit tests
 npm run test:all     # every end-to-end suite (needs Chrome / Chromium)
+npm run demo         # remake examples/demo (offline)
+npm run demo:ai      # remake examples/demo-ai with the model in src/local-defaults.json
 ```
 
 Project layout, the full list of tools, the recipe and extension design, and all settings are in [docs/REFERENCE.md](docs/REFERENCE.md).

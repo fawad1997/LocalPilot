@@ -28,6 +28,7 @@ export const ISSUE_HELP = {
   'mobile-overflow': ['Page is wider than a phone screen', 'At 390 px wide the page scrolls sideways. Something is too wide for mobile.'],
   'horizontal-overflow': ['Page scrolls sideways on desktop', 'Some element is wider than the window.'],
   'slow-page': ['Slow page', `The page took longer than ${SLOW_MS / 1000} s to load.`],
+  'rate-limited': ['The site asked LocalPilot to slow down', 'It answered "429 Too Many Requests". That is the site protecting itself, not a bug; these pages or links were not checked.'],
   'missing-alt': ['Image without alt text', 'Screen readers cannot describe it. Add alt="" for decorative images or a short description.'],
   'unlabeled-field': ['Form field without a label', 'Screen readers and autofill cannot tell what the field is for. Add a <label> or aria-label.'],
   'unnamed-button': ['Button without a name', 'An icon-only button with no text or aria-label is unusable with a screen reader.'],
@@ -255,14 +256,18 @@ export async function checkLinks(links, origin, limit, known = new Map()) {
   const worker = async () => {
     while (i < todo.length) {
       const l = todo[i++];
-      results.push({ ...l, status: known.get(l.url) ?? (await fetchStatus(l.url)) });
+      const known_ = known.get(l.url);
+      if (known_ == null) await sleep(250); // be gentle: sites rate-limit fast checkers
+      results.push({ ...l, status: known_ ?? (await fetchStatus(l.url)) });
     }
   };
-  await Promise.all(Array.from({ length: 4 }, worker));
+  await Promise.all(Array.from({ length: 2 }, worker));
   const issues = [];
   for (const r of results) {
     const internal = new URL(r.url).origin === origin;
-    if (internal && (typeof r.status !== 'number' || r.status >= 400)) {
+    if (r.status === 429) {
+      issues.push({ severity: 'info', type: 'rate-limited', page: r.from, detail: `${r.url} was not checked: the site answered 429` });
+    } else if (internal && (typeof r.status !== 'number' || r.status >= 400)) {
       issues.push({ severity: 'error', type: 'broken-link', page: r.from, detail: `${r.url} → ${r.status}${r.text ? ` (link text "${r.text}")` : ''}` });
     } else if (!internal && [404, 410].includes(r.status)) {
       issues.push({ severity: 'warning', type: 'broken-external-link', page: r.from, detail: `${r.url} → ${r.status}${r.text ? ` (link text "${r.text}")` : ''}` });
@@ -364,6 +369,8 @@ export async function testWebsite(ctx, input, helpers) {
   const rec = input.record_gif === false ? null : { title: `Testing ${origin}`, frames: [], startedAt };
   const state = await cdp.attach(tabId);
 
+  const startDir = startUrl.replace(/[^/]*([?#].*)?$/, '');
+  const near = (u) => u.startsWith(startDir);
   const queue = [startUrl];
   const queued = new Set(queue.map(pageKey));
   const pages = [];
@@ -391,7 +398,8 @@ export async function testWebsite(ctx, input, helpers) {
     pageStatus.set(url, page.status);
     pageStatus.set(audit.url, page.status);
     const pageIssues = exampleCounts(audit.issues, audit.counts).map((i) => ({ ...i, page: audit.url }));
-    if (page.status >= 400) pageIssues.unshift({ severity: 'error', type: 'http-error', page: audit.url, detail: `The page returned HTTP ${page.status}` });
+    if (page.status === 429) pageIssues.unshift({ severity: 'info', type: 'rate-limited', page: audit.url, detail: 'The page answered 429 Too Many Requests' });
+    else if (page.status >= 400) pageIssues.unshift({ severity: 'error', type: 'http-error', page: audit.url, detail: `The page returned HTTP ${page.status}` });
     for (const c of state.console.filter((m) => m.ts >= t0 && ['error', 'exception', 'assert'].includes(m.level)).slice(0, 10)) {
       pageIssues.push({ severity: 'error', type: c.level === 'exception' ? 'js-exception' : 'js-error', page: audit.url, detail: c.text.slice(0, 300) });
     }
@@ -430,7 +438,11 @@ export async function testWebsite(ctx, input, helpers) {
       if (!allLinks.has(l.url)) allLinks.set(l.url, { ...l, from: audit.url });
       if (crawlable(l.url, origin) && !queued.has(pageKey(l.url))) {
         queued.add(pageKey(l.url));
-        queue.push(l.url);
+        if (near(l.url)) {
+          // ahead of every page outside the start folder
+          const firstFar = queue.findIndex((q) => !near(q));
+          queue.splice(firstFar < 0 ? queue.length : firstFar, 0, l.url);
+        } else queue.push(l.url);
       }
     }
   }
