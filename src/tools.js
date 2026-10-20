@@ -5,6 +5,8 @@ import { pcToolDefinitions, captureToolDefinitions, runPcOrCaptureTool } from '.
 import { getRecipe, recipeDefinitions, recipeApprovalTarget } from './recipes/index.js';
 import { quantaraToolDefinitions, runQuantaraTool, QUANTARA_TOOLS, QUANTARA_READ_TOOLS, ALWAYS_ASK_TOOLS } from './quantara.js';
 import * as sitenotes from './sitenotes.js';
+import { startRecording, stopRecording, addFrame, buildGif, saveDownload, copyToRoot, safeFileName, stamp, describeAction, recordsAfter } from './recorder.js';
+import { TEST_WEBSITE_DEF, testWebsite } from './sitetest.js';
 import { checkSubmitGuard } from './recipes/apply.js';
 import { handleBotCheck, captchaAtPoint } from './botcheck.js';
 import { log } from './logger.js';
@@ -33,9 +35,33 @@ export function toolDefinitions(settings, host = null, attachments = []) {
     ...(host || attachments.length ? [fileUploadDef(host, attachments)] : []),
     extractListDef(host),
     SITE_NOTE_DEF,
+    gifRecorderDef(host),
+    TEST_WEBSITE_DEF,
     ...recipeDefinitions(host),
     ...quantaraToolDefinitions(settings),
   ];
+}
+
+function gifRecorderDef(host) {
+  const saveTo = host
+    ? { save_to: { type: 'object', properties: { root: { type: 'string', enum: host.roots.map((r) => r.name) }, path: { type: 'string', description: 'Folder inside the root' } }, required: ['root'], description: 'export: also copy the GIF into a PC folder' } }
+    : {};
+  return {
+    name: 'gif_recorder',
+    description:
+      'Record what you do in the browser as an animated GIF the user can watch or share. "start" begins recording (a frame is captured after every click, typing, key press, scroll and navigation, ' +
+      'with a caption and a red marker where you clicked); "export" stops and saves the GIF to Downloads/LocalPilot; "cancel" discards it; "status" says how many frames there are.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['start', 'export', 'cancel', 'status'] },
+        title: { type: 'string', description: 'start: shown on the first frame, e.g. "Checkout flow on shop.example"' },
+        filename: { type: 'string', description: 'export: file name without extension' },
+        ...saveTo,
+      },
+      required: ['action'],
+    },
+  };
 }
 
 const SITE_NOTE_DEF = {
@@ -392,7 +418,7 @@ async function locateRef(tabId, ref) {
   const { frameId, ref: local } = parseRef(ref);
   const box = await callFrame(tabId, frameId, 'locate', local);
   const off = await frameOffset(tabId, frameId);
-  return { x: box.x + off.x, y: box.y + off.y, width: box.width, height: box.height };
+  return { x: box.x + off.x, y: box.y + off.y, width: box.width, height: box.height, label: box.label };
 }
 
 // Async page work (smart waits) per frame.
@@ -528,14 +554,14 @@ async function screenshot(ctx, opts = {}) {
     } else if (opts.fullPage) {
       const content = metrics.cssContentSize || metrics.contentSize;
       params.captureBeyondViewport = true;
-      params.clip = { x: 0, y: 0, width: content.width, height: Math.min(content.height, 12000), scale: 1 };
+      params.clip = { x: 0, y: 0, width: content.width, height: Math.min(content.height, opts.maxHeight || 12000), scale: 1 };
       targetW = Math.min(Math.round(content.width), settings.screenshotMaxWidth);
     } else if (opts.marks) {
       marks = await callPage(tabId, 'drawMarks').catch(() => null);
     }
     const shot = await cdp.send(tabId, 'Page.captureScreenshot', params);
     const resized = await resizeJpeg(shot.data, targetW);
-    if (!opts.clip && !opts.fullPage) {
+    if (!opts.clip && !opts.fullPage && !opts.record) {
       ctx.screenshotScale = { x: cssW / resized.width, y: cssH / resized.height };
       ctx.marks = marks ? new Map(marks.map((m) => [m.n, m.ref])) : null;
     }
@@ -579,9 +605,11 @@ async function targetPoint(ctx, input) {
   const ref = refFromMark(ctx, input);
   if (ref) {
     const box = await locateRef(ctx.tabId, ref);
-    return [Math.round(box.x), Math.round(box.y)];
+    ctx.lastPoint = [Math.round(box.x), Math.round(box.y)]; // for the recorder's click marker and caption
+    ctx.lastLabel = box.label;
+    return ctx.lastPoint;
   }
-  if (Array.isArray(input.coordinate)) return toCss(ctx, input.coordinate);
+  if (Array.isArray(input.coordinate)) return (ctx.lastPoint = toCss(ctx, input.coordinate));
   throw new Error('Provide `ref` or `coordinate`.');
 }
 
@@ -611,6 +639,7 @@ function needsApproval(name, input) {
   if (name === 'downloads_wait' && !input.save_to) return false;
   if (name === 'computer' && READ_ONLY_COMPUTER.has(input.action)) return false;
   if (name === 'extract_list') return extractPages(input) > 1 || !!input.save;
+  if (name === 'gif_recorder') return input.action === 'export' && !!input.save_to;
   return true;
 }
 
@@ -618,6 +647,8 @@ function needsApproval(name, input) {
 async function approvalTarget(ctx, name, input) {
   if (name === 'pc_write_file' || name === 'pc_write_csv' || name === 'capture_save') return `PC folder: ${input.root}`;
   if (name === 'pc_run_script') return `PC script: ${input.name}`;
+  if (name === 'gif_recorder') return `PC folder: ${input.save_to?.root}`;
+  if (name === 'test_website' && input.url) return hostOf(normalizeUrl(input.url));
   if (name === 'downloads_wait') return `PC folder: ${input.save_to?.root}`;
   if (name === 'file_upload') {
     // Sending a local file to a website is approved separately from acting on it.
@@ -701,7 +732,10 @@ export async function runTool(ctx, name, input = {}) {
   const pending = cdp.getState(ctx.tabId)?.pendingDialog;
   if (pending && !DIALOG_SAFE.has(name)) throw new Error(pendingDialogText(pending));
   await checkApproval(ctx, name, input);
+  ctx.lastPoint = null;
+  ctx.lastLabel = null;
   const blocks = await runToolInner(ctx, name, input);
+  if (ctx.recording && recordsAfter(name, input)) await recordFrame(ctx, describeAction(name, input, ctx.lastLabel));
   const blocked = cdp.getState(ctx.tabId)?.pendingDialog; // page scripts would hang now
   if (!blocked && (BOT_CHECK_AFTER.has(name) || (name === 'computer' && BOT_CHECK_ACTIONS.has(input.action)))) {
     const note = await handleBotCheck(ctx, name);
@@ -793,6 +827,16 @@ async function runToolInner(ctx, name, input) {
       return fileUpload(ctx, input);
     case 'extract_list':
       return extractList(ctx, input);
+    case 'gif_recorder':
+      return gifRecorder(ctx, input);
+    case 'test_website': {
+      const res = await testWebsite(ctx, input, {
+        open: (url) => navigate(ctx, { url }),
+        shot: (opts) => screenshot(ctx, { ...opts, record: true }),
+        botCheck: () => handleBotCheck(ctx, 'test_website'),
+      });
+      return [text(res.text)];
+    }
     case 'site_note': {
       const site = sitenotes.siteKey((await tabInfo(ctx.tabId).catch(() => null))?.url);
       if (!site) throw new Error('The controlled tab is not on a website, so there is no site to keep notes for.');
@@ -911,6 +955,54 @@ async function extractList(ctx, input) {
   }
   const json = JSON.stringify(rows);
   return [text(`${rows.length} rows from ${read} page(s) with selector ${selector}${tail}:\n${json.length > 30000 ? `${json.slice(0, 30000)}… truncated (use save to write every row to a file)` : json}`)];
+}
+
+// ---------------------------------------------------------------------------
+// GIF recording: a frame after each action while ctx.recording is set.
+
+export async function recordFrame(ctx, action) {
+  const rec = ctx.recording;
+  if (!rec) return;
+  try {
+    const shot = await screenshot(ctx, { record: true });
+    const tab = await tabInfo(ctx.tabId).catch(() => null);
+    const note = String(ctx.stepNote || '').replace(/\s+/g, ' ').trim();
+    addFrame(rec, { jpeg: shot.data, cssW: shot.cssW, cssH: shot.cssH, action, note: note || tab?.url || '', url: tab?.url, point: ctx.lastPoint });
+  } catch {
+    // a missed frame must never fail the action itself
+  }
+}
+
+// Stops the recording and saves the GIF; returns a one-line summary (or null when there was nothing).
+export async function exportRecording(ctx, { filename, saveTo } = {}) {
+  const rec = stopRecording(ctx);
+  if (!rec?.frames.length) return null;
+  const gif = await buildGif(rec, { width: 800 });
+  const name = `${safeFileName(filename || rec.title || 'recording')}-${stamp(new Date(rec.startedAt))}.gif`;
+  const saved = await saveDownload(gif, name, 'image/gif');
+  const copy = await copyToRoot(ctx, saved.path, saveTo, name);
+  return `Saved a GIF of ${rec.frames.length} step(s) (${Math.round(gif.length / 1024)} KB) to ${saved.path}${copy ? ` and ${copy}` : ''}.`;
+}
+
+async function gifRecorder(ctx, input) {
+  switch (input.action) {
+    case 'start': {
+      startRecording(ctx, input.title);
+      await recordFrame(ctx, 'Start');
+      return [text('Recording. Every click, key press, scroll and page change is captured; call gif_recorder with action "export" when done.')];
+    }
+    case 'status':
+      return [text(ctx.recording ? `Recording: ${ctx.recording.frames.length} frame(s) so far.` : 'Not recording.')];
+    case 'cancel':
+      stopRecording(ctx);
+      return [text('Recording discarded.')];
+    case 'export': {
+      if (!ctx.recording) throw new Error('Nothing is being recorded. Call gif_recorder with action "start" first.');
+      return [text((await exportRecording(ctx, { filename: input.filename, saveTo: input.save_to })) || 'Nothing was captured, so no GIF was saved.')];
+    }
+    default:
+      throw new Error('action must be start, export, cancel or status.');
+  }
 }
 
 async function switchTo(ctx, tabId) {

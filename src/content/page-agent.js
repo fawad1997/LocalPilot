@@ -199,7 +199,9 @@
     const el = lookup(ref);
     el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
     const r = el.getBoundingClientRect();
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2, width: r.width, height: r.height };
+    // What a person would call the element (for recording captions such as: Click "Add to cart").
+    const label = (el.innerText || el.getAttribute('aria-label') || el.value || el.placeholder || el.title || el.alt || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2, width: r.width, height: r.height, label };
   }
 
   function setValue(ref, value) {

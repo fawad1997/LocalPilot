@@ -6,7 +6,7 @@ import { allNotes, removeNote } from '../sitenotes.js';
 const $ = (id) => document.getElementById(id);
 const TEXT_FIELDS = ['provider', 'baseUrl', 'model', 'apiKey', 'extraSystemPrompt', 'permissionMode', 'fallbackModels', 'quantaraUrl', 'quantaraToken', 'newsFeeds'];
 const NUMBER_FIELDS = ['maxSteps', 'maxTokens', 'temperature', 'screenshotMaxWidth', 'maxRetries', 'requestTimeoutSec', 'summarizeAfterTokens'];
-const BOOL_FIELDS = ['sendScreenshots', 'screenshotMarks', 'allowJavascriptTool', 'mcpBridge', 'logging', 'pauseOnBotCheck', 'streaming', 'quantaraEnabled'];
+const BOOL_FIELDS = ['sendScreenshots', 'screenshotMarks', 'allowJavascriptTool', 'mcpBridge', 'logging', 'pauseOnBotCheck', 'streaming', 'quantaraEnabled', 'recordRuns'];
 
 let domains = [];
 

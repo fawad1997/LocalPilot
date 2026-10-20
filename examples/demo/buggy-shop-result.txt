@@ -1,0 +1,16 @@
+Tested 3 page(s) on http://localhost:8080 in 8 s and checked 3 link(s): 9 error(s), 4 warning(s), 0 note(s).
+Problems (most serious first):
+- [error] Broken image: Image did not load: http://localhost:8080/img/missing.png <img> "/img/missing.png" — http://localhost:8080/
+- [error] Broken link: http://localhost:8080/sale → 500 (link text "Sale") — http://localhost:8080/
+- [error] "undefined" / "NaN" / template text on screen: Visible "NaN" in: "€NaN" <p.price> "€NaN" — http://localhost:8080/
+- [error] "undefined" / "NaN" / template text on screen: Visible "undefined" in: "Price: undefined" <p.price> "Price: undefined" — http://localhost:8080/
+- [error] Failed request: GET http://localhost:8080/img/missing.png → 404 — http://localhost:8080/
+- [error] Failed request: GET http://localhost:8080/api/cart → 503 — http://localhost:8080/
+- [error] Page returned an error status: The page returned HTTP 500 — http://localhost:8080/sale
+- [error] Console error: Cart failed to load: HTTP 503 — http://localhost:8080/
+- [error] Uncaught JavaScript exception: TypeError: Cannot read properties of undefined (reading 'name')
+    at http://localhost:8080/about:4:175 — http://localhost:8080/about
+- [warning] Image without alt text: Image has no alt attribute: http://localhost:8080/img/2.png <img> "/img/2.png" — http://localhost:8080/
+- [warning] Page is wider than a phone screen: At 390px wide the page is 1144px wide <div.promo> — http://localhost:8080/
+- [warning] Form field without a label: input name="email" placeholder="you@example.com" has no label <input> "email" — http://localhost:8080/
+- [warning] Button without a name: Button has no text or aria-label <button> — http://localhost:8080/

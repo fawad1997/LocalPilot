@@ -439,6 +439,19 @@ const BUILTIN_COMMANDS = [
   { name: 'tasks', hint: 'Saved tasks and daily schedules', run: () => showSection('tasks') },
   { name: 'attach', hint: 'Attach files to your next message', run: () => attachInput.click() },
   { name: 'new', hint: 'Start a new chat', run: () => port.postMessage({ type: 'reset' }) },
+  {
+    name: 'test',
+    hint: 'Test this website for bugs (report + GIF)',
+    run: (extra) => submit(`Test this website for bugs with test_website${extra ? ` (${extra})` : ''}. Then explain the most important problems in plain words, and how to fix them.`),
+  },
+  {
+    name: 'record',
+    hint: 'Do a task and record it as a GIF: /record <task>',
+    run: (extra) => (extra
+      ? submit(`Start gif_recorder with the title "${extra.replace(/"/g, "'").slice(0, 80)}". Then do this task: ${extra}
+When you are done, export the GIF with gif_recorder and tell me where it was saved.`)
+      : addNote('Type what to record after /record, for example: /record search this site for pricing', 'error')),
+  },
 ];
 
 function clearComposer() {
@@ -456,7 +469,7 @@ function submit(text) {
   const builtin = slash && BUILTIN_COMMANDS.find((c) => c.name === slash[1].toLowerCase());
   if (builtin) {
     clearComposer();
-    builtin.run();
+    builtin.run((slash[2] || '').trim());
     return;
   }
   const files = pendingFiles.splice(0);
@@ -764,6 +777,7 @@ const EXAMPLES = [
   { group: 'Trading (Quantara)', items: ['How is Quantara doing today?', 'Why is Quantara not trading more today?', 'Which trading sessions have worked so far for Quantara?'] },
   { group: 'Trading research', pc: true, items: ['Collect the USD high-impact economic calendar for 2025 for Quantara', 'Collect today\'s gold and USD news headlines for Quantara'] },
   { group: 'Memory', items: ['Remember for this site: the search URL is the one in the address bar now'] },
+  { group: 'Testing', items: ['/test', 'Test this website for bugs, at most 5 pages, and record a GIF', '/record search this site for "pricing" and open the first result'] },
 ];
 
 function renderHelpCommands() {

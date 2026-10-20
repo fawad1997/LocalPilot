@@ -4,6 +4,10 @@ LocalPilot is a Chrome extension that lets an AI assistant use your browser for 
 
 The important part: the AI runs **on your own computer** (a "local LLM"), so your pages and chats do not go to a cloud service. There is no account and no telemetry.
 
+![LocalPilot testing a website: each page is checked on desktop and phone, and problems are outlined in red](examples/demo/buggy-shop-test.gif)
+
+**See what it can do:** [examples and demos](examples/README.md): testing a website for bugs, GIF recordings, turning a page into a spreadsheet, and prompts to copy.
+
 > **New to this?** Follow the steps in order. You will need about 30 minutes the first time. Nothing here changes your computer's security settings, and you can remove everything by deleting the folder and the extension.
 
 ---
@@ -123,6 +127,22 @@ To remove the PC bridge later, run `node host/install.mjs --uninstall`.
 | "/tasks" | Opens **saved tasks**: prompts you can rerun with `/name`, or run every day, every hour or on a schedule |
 
 Type `/` in the box to see all commands. Click the **?** icon for setup status and more examples.
+
+### Test a website for bugs: `/test`
+
+Open any website and type **`/test`**. LocalPilot opens the site's pages one by one, without filling in forms or clicking log-out or delete links. It looks for:
+- code errors, and broken links and images;
+- "undefined" or "NaN" showing on the page;
+- form fields without labels;
+- pages too wide for a phone, and slow pages.
+
+When it finishes, a **report** opens in a new tab, with screenshots where every problem is outlined in red and an animated **GIF** of the whole test. Both are saved in your `Downloads/LocalPilot` folder. The AI then explains the most important problems in plain words.
+
+### Record what it does: `/record`
+
+Type **`/record`** and a task, for example `/record search this site for pricing`. LocalPilot does the task and saves a GIF where every step has a caption and a red circle shows each click. To record every task automatically, tick **Record every run as an animated GIF** in Settings.
+
+See the [examples page](examples/README.md) for real reports and GIFs.
 
 ---
 

@@ -1,7 +1,8 @@
 // Agent loop: model <-> browser tools, provider-agnostic.
 import { createProvider, ProviderError, retryDelayMs } from './providers.js';
 import { log } from './logger.js';
-import { toolDefinitions, runTool, setIndicator } from './tools.js';
+import { toolDefinitions, runTool, setIndicator, recordFrame, exportRecording } from './tools.js';
+import { startRecording } from './recorder.js';
 import * as cdp from './cdp.js';
 import * as pcbridge from './pcbridge.js';
 import { recipePromptLines } from './recipes/index.js';
@@ -73,6 +74,7 @@ function systemPrompt(settings, tab, host, notes = null) {
     '- Use computer screenshot when layout or visuals matter, or to verify the result of an action. Coordinates refer to the most recent screenshot.',
     '- Use get_page_text to read articles, search results and long content.',
     '- To collect a list from any site (search results, cards, table rows), use extract_list (detect, then extract; save writes a CSV) instead of copying items by hand.',
+    '- To test a website for bugs, use test_website (it crawls read-only, records a GIF and writes a report), then explain the findings. To record what you do as a GIF, use gif_recorder (start, then export).',
     '- One step at a time: act, then check what happened before the next action.',
     '- When the task is done, reply with a short final answer in plain text and stop calling tools.',
     '- If you are blocked (login, CAPTCHA, missing information, a decision only the user can make), stop and ask the user.',
@@ -258,6 +260,11 @@ export class AgentRun {
     this.ctx.runId = this.runId;
     await setIndicator(this.ctx.tabId, true);
     this.ctx.host = settings.pcBridge === false ? null : await pcbridge.probe();
+    // Settings > "Record every run as a GIF": frames come from runTool after each action.
+    if (settings.recordRuns && prompt !== null && !this.ctx.recording) {
+      startRecording(this.ctx, prompt);
+      await recordFrame(this.ctx, 'Start');
+    }
     const startTab = await chrome.tabs.get(this.ctx.tabId).catch(() => null);
     log('run_start', {
       runId: this.runId, tabId: this.ctx.tabId, url: startTab?.url, resumed: prompt === null, prompt,
@@ -305,6 +312,8 @@ export class AgentRun {
           if (b.type === 'text' && b.text.trim()) this.emit({ type: 'assistant', text: b.text });
         }
         const toolUses = response.content.filter((b) => b.type === 'tool_use');
+        // What the model said before acting becomes the recording's caption for these steps.
+        this.ctx.stepNote = response.content.filter((b) => b.type === 'text').map((b) => b.text).join(' ').slice(0, 160);
         if (!toolUses.length) {
           endReason = 'end_turn';
           this.emit({ type: 'done', reason: 'end_turn' });
@@ -346,6 +355,14 @@ export class AgentRun {
       this.emit({ type: 'error', text: String(err.message || err), canRetry: !!err.canRetry });
       this.emit({ type: 'done', reason: 'error', canRetry: !!err.canRetry });
     } finally {
+      if (this.ctx.recording && settings.recordRuns) {
+        try {
+          const saved = await exportRecording(this.ctx);
+          if (saved) this.emit({ type: 'notice', text: `Recording: ${saved}` });
+        } catch (err) {
+          this.emit({ type: 'notice', text: `The GIF could not be saved: ${err.message || err}` });
+        }
+      }
       log('run_end', { runId: this.runId, reason: endReason, steps, ms: Date.now() - runStarted });
       this.ctx.running = false;
       if (this.conversation.running === this) this.conversation.running = null;

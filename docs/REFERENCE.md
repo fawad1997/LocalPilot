@@ -16,7 +16,7 @@ It is an independent implementation. The design came from studying how Claude in
 ## Using the panel
 
 - **Help** (`?` icon, or type `/help`): setup status for the model server and the PC bridge, with the steps and a **Copy** button for the install command, the list of commands, and example prompts you can click to try. Clicking the **PC: off** badge opens the setup steps.
-- **Commands:** type `/` in the box to see them. Built in: `/help`, `/tasks` (saved tasks), `/attach` (pick files), `/new` (new chat). Every saved task is also a command (`/name`). Arrow keys pick, Tab completes, Enter runs.
+- **Commands:** type `/` in the box to see them. Built in: `/help`, `/tasks` (saved tasks), `/attach` (pick files), `/new` (new chat), `/test` (test this website for bugs), `/record <task>` (do a task and save it as a GIF). Every saved task is also a command (`/name`). Arrow keys pick, Tab completes, Enter runs.
 - **Attach files:** the paperclip next to the box, drag and drop onto the panel, or paste. Up to 15 MB per file. The model gets the list of files, the text of small text files (txt, csv, json, md…) and images (when screenshots are on). It can upload an attached file into a page's file field ("Upload the attached CV to the resume field") without the PC bridge. Attached files stay available until **New chat**; they are not kept after a browser restart.
 
 ## One chat per tab
@@ -294,6 +294,54 @@ Examples:
 - A task `wuhan-jobs` with "Collect 30 new 全栈工程师 jobs on BOSS in Wuhan and Shenzhen", daily at 08:00.
 - A watch `acme-careers` on `https://acme.com/careers`, selector `.openings`, every 60 min, notify on change.
 
+## Testing mode: `test_website`
+
+`/test` in the panel (or "Test this website for bugs") runs `test_website`. It is a read-only crawler on the site of the current tab or `url`.
+
+**What it does on each page** (up to `max_pages`, default 8, max 40, same origin only):
+1. Opens the page and waits for it to settle, then 1.2 s more for late errors.
+2. Reads the console and network capture for that page:
+   - console errors, uncaught exceptions;
+   - failed requests (4xx/5xx or network errors, ignoring aborted and ad-blocked ones);
+   - the page's own HTTP status.
+3. Audits the page itself:
+   - broken images, images without alt text;
+   - visible bug text (`undefined`, `NaN`, `[object Object]`, `{{ template }}`, `${…}`), placeholder "Lorem ipsum";
+   - form fields without a label, buttons without a name, links without text;
+   - duplicate ids, missing title / h1 / viewport / lang;
+   - insecure `http` resources on `https` pages, horizontal overflow, load time over 3 s.
+4. Outlines the problem elements in red, then takes a viewport shot (for the GIF) and a full-page shot (up to 4000 px, for the report).
+5. **Phone check** (`mobile`, default on): emulates a 390 × 844 phone, reports when the page is wider than the screen (and which element sticks out), and takes a phone screenshot.
+
+**After the crawl:**
+- **Link check:** up to `check_links` links (default 60, max 300) get HEAD (GET when HEAD is refused), 4 at a time. Broken internal links are errors; external 404/410 are warnings; 403/429 from other sites are ignored as bot protection.
+- **Files:**
+  - `Downloads/LocalPilot/test-<host>-<time>.html`: a self-contained report with summary cards, problems by type with plain-language explanations, the GIF, and every page with screenshots and its problems;
+  - `…gif`: the recording.
+- **Report tab:** the report opens in a new tab (`open_report`, not for MCP calls). `save_to: {root, path}` also copies both files into a PC root.
+- **Result for the model:** counts and the 30 most serious problems, so it can explain them.
+
+**Safety:** it only opens pages with GET. It never types, fills or submits forms, and it skips links that look like log-out, delete, unsubscribe, add-to-cart, checkout, pay or order, plus file downloads. Bot checks pause for the user as everywhere else. Acting on the site needs the normal site approval.
+
+**Limits:** examples are capped at 8 per problem type per page; the count still includes all of them. The phone check uses Chrome's device emulation and clears it afterwards.
+
+## GIF recording: `gif_recorder`
+
+Recording works without the PC bridge. Files go to `Downloads/LocalPilot/` through `chrome.downloads`.
+
+- **`gif_recorder`** has four actions:
+  - `start` (with a `title`) begins recording and captures the current page.
+  - While recording, a frame is captured after every click, typing, key press, scroll, drag, navigation, new or switched tab, form fill, upload and dialog answer.
+  - `export` stops and saves the GIF (`filename`, optional `save_to`).
+  - `cancel` discards the recording; `status` counts the frames.
+- **Frames:**
+  - 800 px wide, with a dark caption bar: the step number, the action (`Click "Add to cart"`, using the element's visible text), and what the model said before acting (or the URL).
+  - A red circle marks the click point. The first frame is a title card; the last stays on screen for 3 s.
+  - At most 120 frames: the first is kept, then the most recent.
+- **`/record <task>`** asks the model to start recording, do the task and export.
+- **Settings → "Record every run as an animated GIF"** records every panel run and announces the saved file in the chat.
+- **Encoder** (`src/gif.js`): plain-JS GIF89a, with a 256-colour median-cut palette per frame and LZW. Frames are drawn with `OffscreenCanvas` in the service worker.
+
 ## Site memory: `site_note`
 
 The agent can keep up to 10 short notes (300 characters each) per website, for example "the search URL is /jobs/search?keywords=…&location=…" or "the Apply button opens a modal". Small local models then stop relearning the same site every run.
@@ -325,6 +373,8 @@ The agent can keep up to 10 short notes (300 characters each) per website, for e
 | `javascript_tool` | Runs JS in the page. **Off by default**; turn it on in Settings. |
 | `extract_list` | Detects repeating lists on any page and returns or saves them as rows, with paging (see above) |
 | `site_note` | Per-site memory: add, list or remove short notes for the current site |
+| `test_website` | Testing mode: read-only crawl, bug checks, phone check, link check; HTML report + GIF (see above) |
+| `gif_recorder` | Record the session as an animated GIF: start, export, cancel, status |
 | Recipes | `boss_collect_jobs`, `liepin_collect_jobs`, `job51_collect_jobs`, `zhaopin_collect_jobs`, `linkedin_collect_jobs`, `apply_assist`, `econ_calendar_collect`, `news_collect` (need the PC bridge; see above) |
 | Quantara | `quantara_status`, `quantara_trades`, `quantara_analysis`, `quantara_research`, and `quantara_halt` with a token (only when turned on in Settings; see **Trading: Quantara**) |
 
@@ -355,6 +405,11 @@ src/recipes/            recipe registry (index.js), shared helpers (common.js), 
 src/tasks.js            saved tasks, schedules (daily / weekdays / interval), change detection
 src/quantara.js         Quantara dashboard tools (read-only + emergency stop that always asks)
 src/sitenotes.js        per-site notes (site_note) and their system-prompt section
+src/sitetest.js         testing mode (test_website): page audit, phone check, link check, HTML report
+src/recorder.js         GIF recording: frames, captions, click markers, saving through chrome.downloads
+src/gif.js              GIF89a encoder (median-cut palette + LZW)
+src/ui/report.html      shows the latest test report in a tab
+examples/               demos and prompts; examples/demo is made by `npm run demo`
 host/jobs-scripts/      scripts installed into the Jobs folder (log-application.mjs)
 src/tools.js            tool schemas and executors (CDP input, screenshots, page scripts)
 src/cdp.js              chrome.debugger attach/release, per-tab store (console, network, captures, dialogs), input
@@ -377,6 +432,8 @@ npm run test:e2e:phase-a     # captures survive detach, chats survive SW restart
 npm run test:e2e:phase-b     # smart wait, wait_for, marks, iframes, upload, downloads, full-page shots, zoom
 npm run test:e2e:phase-c     # recipe registry, mock Liepin/51job/Zhaopin/LinkedIn + dedup, apply_assist, saved tasks + alarm, plan mode, summaries, streaming, Help + "/" menu + attached-file upload
 npm run test:e2e:phase-d     # mock Quantara (status, analysis, halt asks every time), interval/weekday schedules, no-AI page watch, extract_list paging, calendar (page data + table, UTC self-check), news feeds, site notes
+npm run test:e2e:phase-e     # testing mode on a buggy mock shop (every check, logout never opened, report + GIF), gif_recorder, record every run, /test and /record
+npm run demo                 # regenerate examples/demo (books.toscrape.com needs internet; --offline for the demo shop only)
 npm run test:all       # everything
 npm run mock        # standalone mock model on http://127.0.0.1:11999/v1 (test page at /page)
 ```
@@ -388,7 +445,7 @@ Add `--headed` to `node tests/e2e.mjs` to watch the run.
 - MV3 extension with a React side panel, a module service worker that runs the agent loop against `/v1/messages`, and an offscreen document.
 - Tools run through `chrome.debugger` CDP calls (`Input.dispatchMouseEvent`, `Input.dispatchKeyEvent`, `Page.captureScreenshot`, `Runtime.evaluate`, and `Network.*` / `Runtime.consoleAPICalled` for capture). It also uses `chrome.scripting` for page access.
 - A content script in every frame builds a ref-tagged accessibility tree (a ref → element map). An overlay script draws the "agent active" frame with a Stop button.
-- Extra features not cloned here: tab groups for agent tabs, GIF recording, file/image upload, saved shortcuts and scheduled tasks, and an MCP / native-messaging bridge to Claude Code.
+- Features of Claude in Chrome that LocalPilot has since added in its own way: tab groups for agent tabs, GIF recording, file/image upload, saved shortcuts and scheduled tasks, and an MCP / native-messaging bridge to Claude Code.
 
 ## Not done yet
 

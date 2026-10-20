@@ -22,8 +22,8 @@ export function migrate(task) {
   return { notifyOn: 'always', ...task };
 }
 
-// Built-in panel commands (/help, /tasks, /new, /attach); saved tasks cannot use these names.
-export const RESERVED_NAMES = ['help', 'tasks', 'new', 'attach'];
+// Built-in panel commands (/help, /tasks, /new, /attach, /test, /record); saved tasks cannot use these names.
+export const RESERVED_NAMES = ['help', 'tasks', 'new', 'attach', 'test', 'record'];
 
 export function validName(name) {
   return /^[\p{L}\p{N}_-]{1,40}$/u.test(String(name || ''));

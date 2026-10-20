@@ -53,6 +53,7 @@ export const DEFAULTS = {
   quantaraUrl: 'http://127.0.0.1:8787',
   quantaraToken: '',
   newsFeeds: '', // RSS/Atom URLs for news_collect, one per line (empty = the built-in list)
+  recordRuns: false, // save every run as an animated GIF in Downloads/LocalPilot
 };
 
 // Optional machine-local defaults (e.g. your API key), kept out of version control.

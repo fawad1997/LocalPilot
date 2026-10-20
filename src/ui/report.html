@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LocalPilot test report</title>
+  <style>
+    html, body { margin: 0; height: 100%; font: 14px/1.4 "Segoe UI", system-ui, sans-serif; background: #f8fafc; color: #0f172a; }
+    header { display: flex; gap: 12px; align-items: center; padding: 8px 16px; background: #0f172a; color: #e2e8f0; }
+    header b { color: #60a5fa; }
+    header code { color: #cbd5e1; word-break: break-all; }
+    iframe { border: 0; width: 100%; height: calc(100% - 40px); background: #f8fafc; }
+    p.empty { padding: 32px; }
+  </style>
+</head>
+<body>
+  <header><b>LocalPilot</b> <span>Test report, saved as</span> <code id="path"></code></header>
+  <iframe id="frame" title="Test report" sandbox="allow-popups allow-popups-to-escape-sandbox"></iframe>
+  <script type="module" src="report.js"></script>
+</body>
+</html>
