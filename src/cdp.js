@@ -10,6 +10,7 @@ const attached = new Set(); // tabIds with a live debugger attachment
 const MAX_CONSOLE = 500;
 const MAX_NETWORK = 500;
 const DIALOG_TIMEOUT_MS = 60000;
+const ENABLE_TIMEOUT_MS = 1500;
 
 function target(tabId) {
   return { tabId };
@@ -47,14 +48,30 @@ export async function attach(tabId) {
   }
   attached.add(tabId);
   state.inflight.clear(); // requests from before this attachment will never report back
-  await Promise.all([
+  const enabling = Promise.all([
     send(tabId, 'Page.enable'),
     send(tabId, 'Runtime.enable'),
     send(tabId, 'Network.enable'),
   ]);
-  // Keep pages interactive even when the window is not focused.
-  await send(tabId, 'Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {});
+  const answered = await Promise.race([enabling.then(() => true), new Promise((r) => setTimeout(() => r(false), ENABLE_TIMEOUT_MS))]);
+  if (!answered) {
+    // The page does not answer: almost always a dialog that opened before we attached. Chrome
+    // never reports those to the debugger and cannot answer them; only a reload (or the user) closes it.
+    const dialog = { type: 'unknown', message: '', preAttach: true, ts: Date.now() };
+    state.pendingDialog = dialog;
+    enabling.then(() => {
+      if (state.pendingDialog === dialog) state.pendingDialog = null;
+      return emulateFocus(tabId);
+    }).catch(() => {});
+    return state;
+  }
+  await emulateFocus(tabId);
   return state;
+}
+
+// Keep pages interactive even when the window is not focused.
+function emulateFocus(tabId) {
+  return send(tabId, 'Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {});
 }
 
 export function isAttached(tabId) {
@@ -87,7 +104,23 @@ export async function release(tabId) {
   }
   users.delete(tabId);
   await detach(tabId);
+  for (const [child, opener] of openedBy) {
+    if (opener !== tabId) continue;
+    openedBy.delete(child);
+    await release(child);
+  }
 }
+
+// A tab opened by a tab in use (target=_blank, window.open) is attached at once, so a
+// dialog it shows while loading is caught; it is released with its opener.
+const openedBy = new Map(); // tabId -> opener tabId
+
+chrome.webNavigation.onCreatedNavigationTarget.addListener(({ sourceTabId, tabId }) => {
+  if (!users.has(sourceTabId)) return;
+  openedBy.set(tabId, sourceTabId);
+  retain(tabId);
+  attach(tabId).catch(() => {});
+});
 
 // The tab's store, whether or not the debugger is attached right now.
 export function getState(tabId) {
@@ -102,6 +135,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   attached.delete(tabId);
   users.delete(tabId);
   stores.delete(tabId);
+  openedBy.delete(tabId);
 });
 
 chrome.debugger.onEvent.addListener((source, method, params) => {
@@ -201,6 +235,14 @@ export async function handleDialog(tabId, accept, promptText) {
   const state = stores.get(tabId);
   const dialog = state?.pendingDialog;
   if (!dialog) throw new Error('No dialog is open on this tab.');
+  if (dialog.preAttach) {
+    // Chrome cannot answer a dialog that opened before we attached; a reload closes it
+    // (as "Cancel"). The reloaded page is fully attached, so its own dialogs are caught.
+    const { url } = await chrome.tabs.get(tabId);
+    await send(tabId, 'Page.navigate', { url });
+    state.pendingDialog = null;
+    return { ...dialog, reloaded: true };
+  }
   await send(tabId, 'Page.handleJavaScriptDialog', { accept: !!accept, ...(promptText !== undefined ? { promptText: String(promptText) } : {}) });
   state.pendingDialog = null;
   return dialog;

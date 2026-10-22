@@ -392,6 +392,8 @@ The agent can keep up to 10 short notes (300 characters each) per website, for e
   - `confirm()`, `prompt()` and "Leave page?" stay open. The model must answer with `handle_dialog`, which goes through the normal approvals; until then other page tools refuse to run.
   - An unanswered dialog is **dismissed** (Cancel) after 60 s.
   - "Are you sure you want to delete…?" is never auto-confirmed.
+  - **A dialog that opened before LocalPilot attached to the tab** (for example an alert shown while the page loads, before you asked anything) is invisible to Chrome's debugger, and Chrome cannot answer it. LocalPilot notices that the page has stopped answering (after 1.5 s) and tells the model, instead of hanging. The model then asks you to click OK or Cancel in the tab, or calls `handle_dialog`, which reloads the page to close it (like Cancel). The reloaded page is fully attached, so its own dialogs are then handled as above.
+  - Tabs that a controlled page opens (links with `target=_blank`, `window.open`) are attached as soon as they are created, so their dialogs are caught too.
 - Chats are kept in session storage, so they survive a background-worker restart. Screenshot pixels are not stored. Chats are cleared when the tab or browser closes.
 
 ## Layout
@@ -433,6 +435,7 @@ npm run test:e2e:phase-b     # smart wait, wait_for, marks, iframes, upload, dow
 npm run test:e2e:phase-c     # recipe registry, mock Liepin/51job/Zhaopin/LinkedIn + dedup, apply_assist, saved tasks + alarm, plan mode, summaries, streaming, Help + "/" menu + attached-file upload
 npm run test:e2e:phase-d     # mock Quantara (status, analysis, halt asks every time), interval/weekday schedules, no-AI page watch, extract_list paging, calendar (page data + table, UTC self-check), news feeds, site notes
 npm run test:e2e:phase-e     # testing mode on a buggy mock shop (every check, logout never opened, report + GIF), gif_recorder, record every run, /test and /record
+npm run test:e2e:dialogs     # a dialog open before attach: reported at once, freed by handle_dialog; new tabs attached at once
 npm run demo                 # regenerate examples/demo: the buggy demo shop (offline, no model)
 npm run demo:ai              # regenerate examples/demo-ai: LocalPilot's agent with your model on real sites (model from src/local-defaults.json or LP_BASE_URL / LP_MODEL / LP_API_KEY)
 npm run test:all       # everything

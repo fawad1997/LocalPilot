@@ -275,7 +275,8 @@ function browserToolDefinitions(settings) {
       name: 'handle_dialog',
       description:
         'Answer a JavaScript confirm / prompt / "leave page?" dialog that is open in the tab. Tools report when one opens. ' +
-        'accept=false is Cancel. These dialogs often guard destructive actions (delete, discard changes): only accept when that is clearly what the user asked for.',
+        'accept=false is Cancel. These dialogs often guard destructive actions (delete, discard changes): only accept when that is clearly what the user asked for. ' +
+        'A dialog that opened before LocalPilot connected cannot be answered: this call then reloads the page to close it.',
       input_schema: {
         type: 'object',
         properties: { accept: { type: 'boolean' }, prompt_text: { type: 'string', description: 'Text to enter for a prompt() dialog.' } },
@@ -718,6 +719,9 @@ const BOT_CHECK_ACTIONS = new Set(['left_click', 'right_click', 'double_click', 
 const DIALOG_SAFE = new Set(['handle_dialog', 'downloads_wait', 'tabs_context', 'tabs_create', 'switch_tab', 'read_console_messages', 'read_network_requests', 'capture_read', 'capture_save', 'pc_list_dir', 'pc_read_file', 'pc_write_file', 'pc_write_csv', 'pc_run_script']);
 
 function pendingDialogText(d) {
+  if (d.preAttach) {
+    return 'The page is not responding: a dialog (alert, confirm, prompt or "Leave page?") is probably open in the tab. It opened before LocalPilot connected to the tab, so Chrome does not let LocalPilot read or answer it. Either ask the user to click OK or Cancel in the tab and then continue, or call handle_dialog to reload the page, which closes the dialog (as Cancel; anything typed on the page is lost).';
+  }
   const kind = d.type === 'beforeunload' ? '"Leave page?"' : d.type;
   return `A ${kind} dialog is open: "${d.message}"${d.type === 'prompt' ? ` (default: "${d.defaultPrompt || ''}")` : ''}. The page is blocked until you call handle_dialog (accept true/false). It is dismissed automatically after 60 s.`;
 }
@@ -838,8 +842,13 @@ async function runToolInner(ctx, name, input) {
       return javascriptTool(ctx, input);
     case 'handle_dialog': {
       const d = await cdp.handleDialog(ctx.tabId, input.accept, input.prompt_text);
-      log('dialog_handled', { runId: ctx.runId, type: d.type, message: d.message, accept: !!input.accept });
+      log('dialog_handled', { runId: ctx.runId, type: d.type, message: d.message, accept: !!input.accept, reloaded: !!d.reloaded });
+      if (d.reloaded) {
+        await sleep(150);
+        await waitForLoad(ctx.tabId);
+      }
       await settle(ctx.tabId);
+      if (d.reloaded) return [text(`The dialog opened before LocalPilot connected, so it could not be answered; reloaded the page instead, which closed it.${await dialogNote(ctx.tabId)}`)];
       return [text(`${input.accept ? 'Accepted' : 'Dismissed'} the ${d.type} dialog "${d.message}".${await dialogNote(ctx.tabId)}`)];
     }
     case 'file_upload':

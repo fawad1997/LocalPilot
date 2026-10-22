@@ -7,7 +7,7 @@ import { probe } from './pcbridge.js';
 import { log, flush as flushLogs } from './logger.js';
 import { runTool, callPage } from './tools.js';
 import { detectBotCheck } from './botcheck.js';
-import { detach as cdpDetach, isAttached as cdpIsAttached } from './cdp.js';
+import { detach as cdpDetach, isAttached as cdpIsAttached, retain as cdpRetain } from './cdp.js';
 import * as tasks from './tasks.js';
 import { resolveApplication, pendingApplications } from './recipes/apply.js';
 
@@ -523,6 +523,7 @@ globalThis.__localPilotTest = {
   },
   detachTab: (tabId) => cdpDetach(tabId),
   isAttached: (tabId) => cdpIsAttached(tabId),
+  retain: (tabId) => cdpRetain(tabId), // as a run or MCP session does for the tabs it uses
   // Simulates a service-worker restart: in-memory chats are gone, storage remains.
   dropMemory() {
     for (const [key, conv] of [...conversations]) if (!conv.running) conversations.delete(key);
