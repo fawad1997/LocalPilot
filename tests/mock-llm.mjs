@@ -317,8 +317,10 @@ function scriptedFlow(messages, base, steps) {
   const last = tools.at(-1)?.content || '';
   const next = steps[step];
   if (!next) return { role: 'assistant', content: `FINAL: ${tools.map((t) => t.content).join(' || ')}` };
-  const [name, args] = next(last, tools.map((t) => t.content).join('\n'));
-  return { role: 'assistant', content: null, tool_calls: [{ id: `call_${step}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }] };
+  // A step is [name, args], or a list of them for several calls in one reply.
+  const out = next(last, tools.map((t) => t.content).join('\n'));
+  const calls = Array.isArray(out[0]) ? out : [out];
+  return { role: 'assistant', content: null, tool_calls: calls.map(([name, args], i) => ({ id: `call_${step}_${i}`, type: 'function', function: { name, arguments: JSON.stringify(args) } })) };
 }
 
 const FLOWS = {
@@ -352,6 +354,22 @@ const FLOWS = {
   'QUANTARA-FLOW': [() => ['quantara_status', {}]],
   'HALT-FLOW': [() => ['quantara_halt', { reason: 'test halt' }]],
   'NOTE-FLOW': [() => ['site_note', { action: 'add', text: 'Search URL is /list?page=N' }]],
+  // 0.9.0: two actions in one reply; the first opens a new page, so the second is skipped.
+  'TALK-FLOW': [], // a reply without any action
+  'PLANTICK-FLOW': [null, () => ['navigate', { url: 'BASE/page' }], () => ['plan_update', { done: [1] }], () => ['get_page_text', {}]],
+  // Saved-task replay: search the shop, read the price. After a replay hands over, `last` is the
+  // replayed step's result, so refs are taken from any "ref_N" in it.
+  'REPLAY-FLOW': [
+    () => ['find', { query: 'Search' }],
+    (last) => ['form_input', { ref: last.match(/(ref_\d+)/)?.[1] || 'ref_missing', value: 'lamp' }],
+    () => ['find', { query: 'button' }],
+    (last) => ['computer', { action: 'left_click', ref: last.match(/(ref_\d+)/)?.[1] || 'ref_missing' }],
+    () => ['get_page_text', {}],
+  ],
+  'DONE-FLOW': [() => ['get_page_text', {}], () => ['done', { success: false, text: 'Could not find the price on this page.' }]],
+  'MULTI-FLOW': [
+    () => [['navigate', { url: 'BASE/qw/next' }], ['computer', { action: 'left_click', ref: 'ref_1' }], ['get_page_text', {}]],
+  ],
   // 0.8.0: a repeated made-up address, a button that does nothing clicked twice, then the step limit.
   'LOOP-FLOW': [
     () => ['navigate', { url: 'BASE/qw/missing' }],
@@ -379,14 +397,56 @@ function noToolsReply(parsed) {
   return null;
 }
 
+// Helper-model requests: the check after a task (verdict from the final answer) and extract
+// (an email, or "Name - $price" lines as JSON, from the page text in the prompt).
+function helperReply(parsed) {
+  const system = parsed.messages.find((m) => m.role === 'system')?.content || '';
+  const last = parsed.messages.at(-1)?.content;
+  const prompt = typeof last === 'string' ? last : (last || []).map((p) => p.text || '').join('');
+  if (/You check the work of a browser agent/.test(system)) {
+    const failed = /Could not|not succeed/.test(prompt.split('Final answer').pop());
+    return { kind: 'judge', prompt, content: JSON.stringify({ verdict: failed ? 'failed' : 'success', reason: failed ? 'The agent did not find what was asked.' : 'The answer matches the steps.', blocked_by: 'none' }) };
+  }
+  if (/You extract information from the text of one web page/.test(system)) {
+    const page = prompt.split('\n---\n').pop();
+    if (/JSON schema/.test(prompt)) {
+      const items = [...page.matchAll(/^(.+?) - \$(\d+(?:\.\d+)?)$/gm)].map((m) => ({ name: m[1].trim(), price: Number(m[2]) }));
+      return { kind: 'extract', prompt, content: JSON.stringify({ products: items }) };
+    }
+    return { kind: 'extract', prompt, content: page.match(/[\w.]+@[\w.]+\.\w+/)?.[0] || 'NOT FOUND' };
+  }
+  return null;
+}
+
+// JSON action mode: the history arrives as text ("Results of your actions: 1. … 2. …"). Turn it
+// back into tool messages, let the scripted flow decide, and answer with the step object.
+function jsonModeReply(parsed, base) {
+  const messages = [];
+  for (const m of parsed.messages) {
+    const text = typeof m.content === 'string' ? m.content : (m.content || []).map((p) => p.text || '').join('\n');
+    const results = m.role === 'user' && text.match(/^Results of your actions:\n([\s\S]*?)(?:\n\[Browser state now|$)/);
+    if (results) {
+      for (const part of results[1].split(/\n(?=\d+\. )/)) messages.push({ role: 'tool', content: part.replace(/^\d+\. /, '') });
+    } else messages.push({ role: m.role, content: text });
+  }
+  const reply = nextReply(messages, base);
+  const textCall = reply.content?.match(/<tool_call>([\s\S]*?)<\/tool_call>/)?.[1];
+  const actions = reply.tool_calls
+    ? reply.tool_calls.map((tc) => ({ tool: tc.function.name, input: JSON.parse(tc.function.arguments) }))
+    : textCall
+      ? [{ tool: JSON.parse(textCall).name, input: JSON.parse(textCall).arguments || {} }]
+      : [{ tool: 'done', input: { success: true, text: reply.content || '' } }];
+  const step = { evaluation_previous_goal: 'Success', memory: `steps so far: ${messages.filter((m) => m.role === 'assistant').length}`, next_goal: `run ${actions[0].tool}`, actions };
+  return { role: 'assistant', content: `\u0060\u0060\u0060json\n${JSON.stringify(step)}\n\u0060\u0060\u0060` };
+}
+
 // Each step inspects the conversation and decides the next tool call.
 function nextReply(messages, base) {
   if (isBossFlow(messages)) return bossReply(messages);
   const flow = Object.keys(FLOWS).find((k) => firstUserText(messages).includes(k));
   if (flow) {
     const steps = FLOWS[flow].map((fn) => (last, all) => {
-      const [name, args] = fn(last, all);
-      return [name, JSON.parse(JSON.stringify(args).replace(/BASE/g, base))];
+      return JSON.parse(JSON.stringify(fn(last, all)).replace(/BASE/g, base));
     });
     return scriptedFlow(messages, base, steps.map((st, i) => (FLOWS[flow][i] ? st : null)));
   }
@@ -433,6 +493,8 @@ function nextReply(messages, base) {
     }
   }
 }
+
+let shopMode = 'normal'; // /qw/shop layout: 'normal', or 'changed' (the button is renamed and moved)
 
 export function startMockServer(port = 11999) {
   const requests = [];
@@ -578,6 +640,22 @@ customElements.define('my-input', class extends HTMLElement {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(QW_FORM);
       return;
     }
+    if (url.pathname === '/qw/shop-mode') {
+      shopMode = url.searchParams.get('m') || 'normal';
+      res.writeHead(200, { 'content-type': 'text/plain' }).end(shopMode);
+      return;
+    }
+    if (url.pathname === '/qw/shop') {
+      const price = "document.getElementById('out').textContent = 'Price: $' + (document.getElementById('q').value === 'lamp' ? 42 : 0)";
+      const button = shopMode === 'changed' ? `<div class="v2"><button id="lookup" onclick="${price}">Look up</button></div>` : `<button id="go" onclick="${price}">Go</button>`;
+      res.writeHead(200, { 'content-type': 'text/html' }).end(`<!doctype html><html><head><title>Shop</title></head><body><h1>Shop</h1><input id="q" placeholder="Search" aria-label="Search">${button}<p id="out">No search yet</p></body></html>`);
+      return;
+    }
+    if (url.pathname === '/qw/products') {
+      const part = (n) => Array.from({ length: 30 }, (_, i) => `<li>Product ${n * 30 + i + 1} - $${(n * 30 + i + 1) * 2}</li>`).join('');
+      res.writeHead(200, { 'content-type': 'text/html' }).end(`<!doctype html><html><head><title>Products</title></head><body><h1>Products</h1><ul>${part(0)}</ul><p>${'Filler text. '.repeat(1200)}</p><ul>${part(1)}</ul><footer>Contact: sales@example.org</footer></body></html>`);
+      return;
+    }
     if (url.pathname === '/qw/next') {
       res.writeHead(200, { 'content-type': 'text/html' }).end(QW_NEXT);
       return;
@@ -623,6 +701,13 @@ customElements.define('my-input', class extends HTMLElement {
       req.on('data', (c) => (body += c));
       req.on('end', () => {
         const parsed = JSON.parse(body);
+        const helper = helperReply(parsed);
+        if (helper) {
+          // The check after a task and extract: kept out of `requests` so step counts stay as before.
+          stats.helper = [...(stats.helper || []), { kind: helper.kind, model: parsed.model, prompt: helper.prompt }];
+          res.writeHead(200, { 'content-type': 'application/json', ...cors }).end(JSON.stringify({ choices: [{ index: 0, message: { role: 'assistant', content: helper.content }, finish_reason: 'stop' }] }));
+          return;
+        }
         requests.push(parsed);
         // Failure models, shaped like the FreeLLMAPI router errors.
         if (parsed.model === 'dead-model' || (parsed.model === 'flaky-model' && (stats.flaky += 1) <= 2)) {
@@ -638,7 +723,22 @@ customElements.define('my-input', class extends HTMLElement {
           res.writeHead(400, { 'content-type': 'application/json', ...cors }).end(JSON.stringify({ error: { message: 'stream is not supported' } }));
           return;
         }
-        const message = noToolsReply(parsed) || nextReply(parsed.messages, `http://${req.headers.host}`);
+        if (parsed.response_format) stats.responseFormats = [...(stats.responseFormats || []), parsed.response_format.type];
+        // A server without json_schema support (it does take json_object).
+        if (parsed.model === 'nojson-model' && parsed.response_format?.type === 'json_schema') {
+          res.writeHead(400, { 'content-type': 'application/json', ...cors }).end(JSON.stringify({ error: { message: 'response_format json_schema is not supported' } }));
+          return;
+        }
+        // A model that answers in prose the first time and only follows the format when told.
+        const lastText = JSON.stringify(parsed.messages.at(-1)?.content || '');
+        if (parsed.model === 'badjson-model' && parsed.response_format && !lastText.includes('not a valid step object')) {
+          stats.badJson = (stats.badJson || 0) + 1;
+          res.writeHead(200, { 'content-type': 'application/json', ...cors }).end(JSON.stringify({ choices: [{ index: 0, message: { role: 'assistant', content: 'I think I should read the page first.' }, finish_reason: 'stop' }] }));
+          return;
+        }
+        const message = parsed.response_format
+          ? jsonModeReply(parsed, `http://${req.headers.host}`)
+          : noToolsReply(parsed) || nextReply(parsed.messages, `http://${req.headers.host}`);
         const usage = { prompt_tokens: Math.round(JSON.stringify(parsed.messages).length / 4), completion_tokens: 20 };
         const finish = message.tool_calls ? 'tool_calls' : 'stop';
         if (parsed.stream) {

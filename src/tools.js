@@ -6,10 +6,12 @@ import { getRecipe, recipeDefinitions, recipeApprovalTarget } from './recipes/in
 import { quantaraToolDefinitions, runQuantaraTool, QUANTARA_TOOLS, QUANTARA_READ_TOOLS, ALWAYS_ASK_TOOLS } from './quantara.js';
 import * as sitenotes from './sitenotes.js';
 import { startRecording, stopRecording, addFrame, buildGif, saveDownload, copyToRoot, safeFileName, stamp, describeAction, recordsAfter } from './recorder.js';
+import { fillSavedValues, maskSavedValues, allowedHost } from './savedvalues.js';
 import { TEST_WEBSITE_DEF, testWebsite } from './sitetest.js';
 import { checkSubmitGuard } from './recipes/apply.js';
 import { handleBotCheck, captchaAtPoint } from './botcheck.js';
 import { WEB_SEARCH_DEF, SEARCH_APPROVAL, webSearch } from './websearch.js';
+import { EXTRACT_DEF, SEARCH_PAGE_DEF, extract, searchPage } from './extract.js';
 import { log } from './logger.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -31,6 +33,9 @@ export function toolDefinitions(settings, host = null, attachments = []) {
   return [
     ...browserToolDefinitions(settings),
     WEB_SEARCH_DEF,
+    SAVE_PDF_DEF,
+    EXTRACT_DEF,
+    SEARCH_PAGE_DEF,
     DOWNLOADS_WAIT_DEF,
     ...captureToolDefinitions,
     ...pcToolDefinitions(host),
@@ -623,7 +628,7 @@ const READ_ONLY_COMPUTER = new Set(['screenshot', 'wait', 'zoom']);
 
 const NO_APPROVAL = new Set([
   'read_page', 'find', 'get_page_text', 'tabs_context', 'switch_tab', 'read_console_messages',
-  'read_network_requests', 'resize_window', 'capture_start', 'capture_read', 'pc_list_dir', 'pc_read_file', 'pc_search',
+  'read_network_requests', 'resize_window', 'capture_start', 'capture_read', 'pc_list_dir', 'pc_read_file', 'pc_search', 'extract', 'search_page',
   ...QUANTARA_READ_TOOLS, 'site_note',
 ]);
 
@@ -766,6 +771,92 @@ export function normalizeToolCall(name, input = {}) {
   return { name: n, input: args };
 }
 
+const SAVE_PDF_DEF = {
+  name: 'save_pdf',
+  description: 'Save the current page as a PDF in Downloads/LocalPilot (backgrounds included). Returns the file path.',
+  input_schema: { type: 'object', properties: { filename: { type: 'string', description: 'Optional file name (without .pdf).' } } },
+};
+
+async function savePdf(ctx, input) {
+  await cdp.attach(ctx.tabId);
+  const tab = await tabInfo(ctx.tabId);
+  const { data } = await cdp.send(ctx.tabId, 'Page.printToPDF', { printBackground: true, preferCSSPageSize: true });
+  const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+  const name = `${safeFileName(input.filename || tab.title || tab.url)}_${stamp()}.pdf`;
+  const saved = await saveDownload(bytes, name, 'application/pdf');
+  return [text(`Saved the page as a PDF (${Math.round(bytes.length / 1024)} KB): ${saved.path}`)];
+}
+
+// A saved task can be limited to some sites (ctx.allowedDomains): no navigating or acting elsewhere.
+async function checkAllowedSites(ctx, name, input) {
+  const list = ctx.allowedDomains;
+  if (!list?.length || name === 'web_search') return;
+  let url = null;
+  if (name === 'navigate' && !['back', 'forward'].includes(input.url)) url = normalizeUrl(String(input.url || ''));
+  else if (name === 'tabs_create' && input.url) url = normalizeUrl(input.url);
+  else if (!TABLESS.has(name)) url = (await tabInfo(ctx.tabId).catch(() => null))?.url;
+  const host = url && hostOf(url);
+  if (host && !allowedHost(host, list)) {
+    throw new Error(`This task may only use ${list.join(', ')}; ${host} is not one of them.${name === 'navigate' || name === 'tabs_create' ? '' : ' Go back to an allowed site with navigate.'}`);
+  }
+}
+
+// {{name}} in typed text becomes the saved value (Settings -> Saved values), on allowed sites and
+// never into a password field. The model only ever sees the placeholder.
+async function applySavedValues(ctx, name, input) {
+  const field = name === 'form_input' ? 'value' : name === 'computer' && input.action === 'type' ? 'text' : null;
+  if (!field || !/\{\{\w+\}\}/.test(String(input[field] ?? ''))) return input;
+  const host = hostOf((await tabInfo(ctx.tabId)).url);
+  const ref = input.ref || (input.mark !== undefined ? refFromMark(ctx, input) : null);
+  const { frameId, ref: local } = parseRef(ref || '');
+  const type = await callFrame(ctx.tabId, frameId, 'fieldType', local || null).catch(() => '');
+  if (type === 'password') throw new Error('Saved values are never typed into password fields. Ask the user to type the password.');
+  return { ...input, [field]: fillSavedValues(String(input[field]), ctx.settings.savedValues, host) };
+}
+
+function maskBlocks(ctx, blocks) {
+  if (!ctx.settings?.savedValues?.length) return blocks;
+  for (const b of blocks) if (b.type === 'text') b.text = maskSavedValues(b.text, ctx.settings.savedValues);
+  return blocks;
+}
+
+// Saved-task replay. While ctx.trace is an array, every successful step that changes something or
+// produces a result is recorded, elements as fingerprints (refs do not survive a reload).
+// Pure looking around (read_page, find, screenshots, web_search) is not: replay needs no eyes.
+const TRACE_SKIP = new Set(['read_page', 'find', 'tabs_context', 'read_console_messages', 'read_network_requests', 'site_note', 'web_search', 'resize_window', 'done']);
+const TRACE_SKIP_ACTIONS = new Set(['screenshot', 'zoom', 'wait', 'hover']);
+// Steps whose output is the task's result: the last one is what a replay reports.
+export const RESULT_TOOLS = new Set(['get_page_text', 'extract', 'search_page', 'extract_list', 'capture_read', 'capture_save']);
+
+function traced(name, input) {
+  return !TRACE_SKIP.has(name) && !(name === 'computer' && TRACE_SKIP_ACTIONS.has(input.action));
+}
+
+async function fingerprintFor(ctx, input) {
+  let ref;
+  try {
+    ref = refFromMark(ctx, input);
+  } catch {
+    return null;
+  }
+  if (!ref) return null;
+  const { frameId, ref: local } = parseRef(ref);
+  if (frameId) return { frame: true }; // frame ids change between loads: such a step needs the agent
+  return withTimeout(callFrame(ctx.tabId, 0, 'fingerprint', local).catch(() => null), 3000);
+}
+
+// A saved step made runnable on the current page: its element found again, or null.
+export async function resolveStep(ctx, step) {
+  const input = { ...step.input };
+  delete input.mark;
+  if (!step.fp) return input;
+  if (step.fp.frame) return null;
+  const hit = await withTimeout(callPage(ctx.tabId, 'matchFingerprint', step.fp).catch(() => null), 4000);
+  if (!hit) return null;
+  input.ref = hit.ref;
+  return input;
+}
+
 // Actions after which the tool reply also says what changed on the page.
 const CHANGE_REPORT_ACTIONS = new Set(['left_click', 'right_click', 'double_click', 'triple_click', 'key', 'type', 'hover', 'left_click_drag']);
 // Of those, the ones that do not wait for the page themselves.
@@ -790,6 +881,36 @@ export function formatChanges(ch) {
   if (ch.addedTotal) parts.push(`Appeared (${ch.addedTotal}):\n${ch.added.map((l) => clip(l)).join('\n')}${ch.addedTotal > ch.added.length ? `\n… and ${ch.addedTotal - ch.added.length} more (read_page shows all)` : ''}`);
   if (ch.removedTotal) parts.push(`Gone (${ch.removedTotal}):\n${ch.removed.map((l) => clip(l)).join('\n')}${ch.removedTotal > ch.removed.length ? `\n… and ${ch.removedTotal - ch.removed.length} more` : ''}`);
   return parts.length ? `\nPage changes:\n${parts.join('\n')}` : '\nNo visible change on the page.';
+}
+
+// The page as the model sees it at the start of every step (settings.sendPageState): the address,
+// other tabs, and the controls visible on screen (covered ones left out). "*" marks controls that
+// are new since the previous step. Returns { text, refs } or null.
+export async function pageState(ctx, seenRefs = null) {
+  const tab = await tabInfo(ctx.tabId).catch(() => null);
+  if (!tab) return null;
+  const lines = ['[Browser state now. It is sent with every step; older states are left out.]', `Tab ${tab.id}: "${tab.title || ''}" ${tab.url}`];
+  const others = (await chrome.tabs.query({ windowId: tab.windowId }).catch(() => [])).filter((t) => t.id !== tab.id);
+  if (others.length) lines.push(`Other tabs: ${others.slice(0, 8).map((t) => `${t.id} "${clip(t.title || t.url || '', 40)}"`).join('; ')}${others.length > 8 ? ` and ${others.length - 8} more` : ''}`);
+  const dialog = cdp.getState(ctx.tabId)?.pendingDialog;
+  if (dialog) {
+    lines.push(pendingDialogText(dialog));
+    return { text: lines.join('\n'), refs: seenRefs || new Set() };
+  }
+  if (!SCRIPTABLE.test(tab.url || '')) return { text: lines.join('\n'), refs: new Set() };
+  const tree = await withTimeout(callPage(ctx.tabId, 'buildTree', { filter: 'interactive', viewportOnly: true, maxChars: 3500 }).catch(() => null), 3000);
+  if (!tree) return { text: lines.join('\n'), refs: seenRefs || new Set() };
+  const [, , viewport, ...controls] = tree.split('\n');
+  lines.push(viewport);
+  // Whole lines are compared, not refs: a new page numbers its refs from ref_1 again.
+  const refs = new Set();
+  const marked = controls.map((raw) => {
+    const l = raw.trimStart();
+    if (/\[ref_\d+\]$/.test(l)) refs.add(`${tab.url}\n${l}`);
+    return seenRefs && /\[ref_\d+\]$/.test(l) && !seenRefs.has(`${tab.url}\n${l}`) ? `*${l}` : l;
+  });
+  lines.push(controls.length ? `Visible controls${seenRefs ? ' (* = new since your last step)' : ''}:\n${marked.join('\n')}` : 'No controls visible on screen: scroll, or read the page text.');
+  return { text: maskSavedValues(lines.join('\n'), ctx.settings?.savedValues), refs };
 }
 
 async function newTabsNote(tabId, before) {
@@ -823,11 +944,13 @@ async function runAndReconnect(ctx, name, input) {
 }
 
 export async function runTool(ctx, rawName, rawInput = {}) {
-  const { name, input } = normalizeToolCall(rawName, rawInput);
+  const { name, input: asked } = normalizeToolCall(rawName, rawInput);
+  await checkAllowedSites(ctx, name, asked);
   if (TABLESS.has(name)) {
-    await checkApproval(ctx, name, input);
-    return runToolInner(ctx, name, input);
+    await checkApproval(ctx, name, asked);
+    return maskBlocks(ctx, await runToolInner(ctx, name, asked));
   }
+  const input = await applySavedValues(ctx, name, asked);
   // Attach early so dialogs, console and network are observed from the first action.
   if (!cdp.isAttached(ctx.tabId)) await cdp.attach(ctx.tabId).catch(() => {});
   const pending = cdp.getState(ctx.tabId)?.pendingDialog;
@@ -836,6 +959,8 @@ export async function runTool(ctx, rawName, rawInput = {}) {
   ctx.lastPoint = null;
   ctx.lastLabel = null;
   cdp.markAgentAction(ctx.tabId);
+  const trace = Array.isArray(ctx.trace) && traced(name, input);
+  const fp = trace && (input.ref || input.mark !== undefined) ? await fingerprintFor(ctx, input) : null;
   const watch = reportsChanges(name, input);
   const before = watch ? await withTimeout(callPage(ctx.tabId, 'snapshot').catch(() => null), 3000) : null;
   const tabsBefore = watch ? new Set((await chrome.tabs.query({}).catch(() => [])).map((t) => t.id)) : null;
@@ -856,6 +981,16 @@ export async function runTool(ctx, rawName, rawInput = {}) {
       if (firstText) firstText.text += note;
       else blocks.unshift(text(note.trim()));
     }
+  }
+  maskBlocks(ctx, blocks);
+  if (trace) {
+    const out = blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
+    const step = { name, input: { ...asked }, ...(fp ? { fp } : {}) }; // placeholders, not the saved values
+    delete step.input.mark;
+    if (fp) delete step.input.ref;
+    if (name === 'computer' && /click|key/.test(input.action || '')) step.changed = !/\nNo visible change on the page\./.test(out);
+    if (RESULT_TOOLS.has(name)) step.result = true;
+    ctx.trace.push(step);
   }
   const notices = cdp.takeNotices(ctx.tabId);
   if (notices.length) {
@@ -980,6 +1115,12 @@ async function runToolInner(ctx, name, input) {
       return downloadsWait(ctx, input);
     case 'web_search':
       return webSearch(ctx, input);
+    case 'save_pdf':
+      return savePdf(ctx, input);
+    case 'extract':
+      return extract(ctx.settings, await callPage(ctx.tabId, 'fullText', 200000), input);
+    case 'search_page':
+      return searchPage(await callPage(ctx.tabId, 'fullText', 200000), input);
     default: {
       const recipe = getRecipe(name);
       if (recipe) return recipe.run(ctx, input);

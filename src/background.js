@@ -128,7 +128,7 @@ function cleanAttachments(list, existing = new Map()) {
   return out;
 }
 
-async function startRun({ conv, tabId, prompt, emit, requestApproval, settingsPatch, panelTabId, files = [] }) {
+async function startRun({ conv, tabId, prompt, emit, requestApproval, settingsPatch, panelTabId, files = [], task = null, extra = '' }) {
   if (conv.running) throw new Error('LocalPilot is already working in this tab. Stop it or wait.');
   const settings = { ...(await loadSettings()), ...settingsPatch };
   const run = new AgentRun({
@@ -140,6 +140,8 @@ async function startRun({ conv, tabId, prompt, emit, requestApproval, settingsPa
     persistApprovedDomains: (domains) => saveSettings({ approvedDomains: domains }),
   });
   run.ctx.panelTabId = panelTabId ?? tabId;
+  if (task) run.ctx.task = { id: task.id, name: task.name, replaySteps: tasks.replayFor(task, extra) };
+  if (task?.allowedDomains?.length) run.ctx.allowedDomains = task.allowedDomains;
   return run.run(prompt, cleanAttachments(files, conv.attachments));
 }
 
@@ -186,6 +188,7 @@ async function runTaskInBackground(task, trigger = 'schedule') {
     conv,
     tabId,
     prompt: task.prompt,
+    task,
     settingsPatch: { permissionMode: current.permissionMode === 'auto' ? 'auto' : 'ask_site' },
     emit: (e) => {
       if (e.type === 'assistant') final = e.text;
@@ -205,8 +208,10 @@ async function runTaskInBackground(task, trigger = 'schedule') {
       return 'deny';
     },
   }).catch((err) => errors.push(String(err.message || err)));
-  const ok = done?.reason === 'end_turn' && !errors.length && !declined.size;
-  let text = ok ? final : [errors.join(' '), done?.text, final].filter(Boolean).join(' ') || 'The task did not finish.';
+  const check = await conv.judging?.catch(() => null);
+  const ok = done?.reason === 'end_turn' && !errors.length && !declined.size && (!check || check.verdict === 'success');
+  let text = done?.reason === 'end_turn' && !errors.length && !declined.size ? final : [errors.join(' '), done?.text, final].filter(Boolean).join(' ') || 'The task did not finish.';
+  if (check && check.verdict !== 'success') text = `Check: ${check.verdict}. ${check.reason}\n${text}`;
   if (declined.size) text += ` Not run because not approved yet: ${[...declined].join(', ')}. Run the task once from the panel and choose "Always allow".`;
   const prev = (await tasks.lastRuns())[task.id] || null;
   const run = { at: startedAt, ok, text: text.slice(0, 2000), trigger, hash: tasks.hashText(text) };
@@ -280,7 +285,8 @@ async function sendTasks(port) {
       type: 'tasks',
       tasks: list.map((t) => {
         const { snapshot, ...lastRun } = runs[t.id] || {}; // page snapshots stay in the worker
-        return { ...t, when: tasks.describeSchedule(t.schedule), lastRun: runs[t.id] ? lastRun : null };
+        const { replay, ...rest } = t; // saved steps stay in the worker too; the panel shows how many
+        return { ...rest, replaySteps: replay?.steps.length || 0, replaySavedAt: replay?.savedAt || null, when: tasks.describeSchedule(t.schedule), lastRun: runs[t.id] ? lastRun : null };
       }),
     });
   } catch {
@@ -318,6 +324,7 @@ chrome.runtime.onConnect.addListener(async (port) => {
       case 'run_saved':
       case 'run': {
         if (msg.type === 'retry') msg.prompt = null; // resume the conversation as it is
+        let savedTask = null;
         // Continue on the tab the agent was last controlling for this conversation.
         const target = conv.controlTabId ?? tabId;
         const tab = await chrome.tabs.get(target).catch(() => chrome.tabs.get(tabId).catch(() => null));
@@ -344,6 +351,7 @@ chrome.runtime.onConnect.addListener(async (port) => {
             return;
           }
           msg.prompt = [task.prompt, msg.extra].filter(Boolean).join('\n');
+          savedTask = task;
           if (task.url && !conv.running) {
             await chrome.tabs.update(tab.id, { url: task.url });
             await waitTabComplete(tab.id);
@@ -360,6 +368,8 @@ chrome.runtime.onConnect.addListener(async (port) => {
           requestApproval,
           panelTabId: tabId,
           files: msg.type === 'retry' ? [] : msg.attachments,
+          task: savedTask,
+          extra: msg.extra,
         }).catch((err) => {
           emit({ type: 'error', text: String(err.message || err) });
           emit({ type: 'done', reason: 'error' });
@@ -406,6 +416,10 @@ chrome.runtime.onConnect.addListener(async (port) => {
         break;
       case 'task_delete':
         await tasks.deleteTask(msg.id);
+        for (const p of conv.ports) await sendTasks(p);
+        break;
+      case 'task_forget_steps':
+        await tasks.clearReplay(msg.id);
         for (const p of conv.ports) await sendTasks(p);
         break;
       case 'ping':
@@ -464,12 +478,15 @@ tasks.ensureSchedules().catch(() => {});
 
 // Test hook: drive a run without the side panel UI (used by tests/e2e*.mjs).
 globalThis.__localPilotTest = {
-  async run({ tabId, prompt, approval = 'once', verification = 'continue', plan = 'approve', files = [] }) {
+  async run({ tabId, prompt, approval = 'once', verification = 'continue', plan = 'approve', files = [], task: taskName = null, extra = '' }) {
     const events = [];
+    const task = taskName ? await tasks.findTask(taskName) : null; // run a saved task, as "/name" does
     await startRun({
       conv: conversationFor(`test:${tabId}`),
       tabId,
-      prompt,
+      prompt: task ? [task.prompt, extra].filter(Boolean).join('\n') : prompt,
+      task,
+      extra,
       files,
       emit: (e) => events.push(e.type === 'tool_result' ? { ...e, content: e.content.map((c) => (c.type === 'image' ? { type: 'image', bytes: c.data.length } : c)) } : e),
       requestApproval: async (req) => {
@@ -485,6 +502,7 @@ globalThis.__localPilotTest = {
         return approval;
       },
     });
+    await conversationFor(`test:${tabId}`).judging?.catch(() => null); // include the check's result
     return events;
   },
   flushLogs,
@@ -500,6 +518,9 @@ globalThis.__localPilotTest = {
   loadSettings,
   reset() {
     for (const key of [...conversations.keys()]) if (String(key).startsWith('test:')) conversations.delete(key);
+  },
+  stop(tabId) {
+    conversations.get(`test:${tabId}`)?.running?.stop();
   },
   conversationSizes() {
     return Object.fromEntries([...conversations].map(([k, c]) => [k, c.messages.length]));

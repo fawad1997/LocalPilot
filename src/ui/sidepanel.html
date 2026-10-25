@@ -99,6 +99,8 @@
       <textarea id="task-prompt" rows="2" placeholder="What LocalPilot should do (not needed for a page watch)" aria-label="Task prompt"></textarea>
       <label class="task-daily"><input type="checkbox" id="task-watch-on" /> Page watch, no AI: compare the start URL's text with the last run</label>
       <input id="task-watch-selector" placeholder="Only this part of the page: CSS selector (optional)" aria-label="Watch selector" hidden />
+      <input id="task-sites" placeholder="Only these sites (optional): example.com, shop.example.org" aria-label="Allowed sites" />
+      <label class="task-daily" id="task-replay-wrap"><input type="checkbox" id="task-replay" checked /> After a run that worked, replay its steps without the AI (the AI steps in if the page changed)</label>
       <div class="task-daily task-sched">
         <label>Run <select id="task-schedule" aria-label="Schedule">
           <option value="off">only when I run it</option>

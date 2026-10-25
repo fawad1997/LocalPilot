@@ -23,3 +23,8 @@ bridge.json
 # Test output
 tests/*.png
 *.zip
+
+# benchmark: Python env for browser-use, raw run logs
+bench/.venv/
+bench/results/*.log
+bench/__pycache__/

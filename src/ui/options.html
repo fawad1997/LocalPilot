@@ -81,6 +81,17 @@
       <label>Own search page instead (optional, <code>{q}</code> = the query)
         <input id="searchUrl" type="url" spellcheck="false" placeholder="http://localhost:8888/search?q={q}" />
       </label>
+      <label>How the model acts
+        <select id="actionMode">
+          <option value="tools">Tool calling (the server's native tools)</option>
+          <option value="json">JSON steps (server-enforced; best for small local models)</option>
+        </select>
+      </label>
+      <label>Helper model for extract and checks (empty = the main model)
+        <input id="helperModel" type="text" spellcheck="false" placeholder="e.g. qwen2.5:3b" />
+      </label>
+      <label class="check"><input id="judgeRuns" type="checkbox" /> Check each task when it ends (✓ / ⚠ in the chat; scheduled tasks that fail the check notify you)</label>
+      <label class="check"><input id="sendPageState" type="checkbox" /> Send the page's visible controls with every step (fewer steps spent reading the page)</label>
       <label class="check"><input id="screenshotMarks" type="checkbox" /> Number clickable elements on screenshots (helps small vision models click accurately)</label>
       <label class="check"><input id="recordRuns" type="checkbox" /> Record every run as an animated GIF (saved in Downloads/LocalPilot)</label>
       <label class="check"><input id="pauseOnBotCheck" type="checkbox" /> Pause and hand over to me when a CAPTCHA or bot check appears</label>
@@ -110,6 +121,12 @@
         <textarea id="newsFeeds" rows="3" spellcheck="false" placeholder="https://www.federalreserve.gov/feeds/press_all.xml"></textarea>
       </label>
       <p class="hint">With a token, the agent also gets <code>quantara_halt</code> (emergency stop: no new entries). You confirm it every time; it is never run by schedules or MCP clients, and resuming stays on Quantara's dashboard.</p>
+    </section>
+
+    <section>
+      <h2>Saved values</h2>
+      <p class="hint">Details the agent can type for you without seeing them: it writes <code>{{email}}</code> and LocalPilot fills in the value. One per line: <code>name = value</code>, optionally <code>| site.com, other.org</code> to allow them only there. Never typed into password fields; never put passwords here.</p>
+      <textarea id="savedValues" rows="4" spellcheck="false" placeholder="email = me@example.com&#10;phone = +31 6 1234 5678 | jobs.example.com"></textarea>
     </section>
 
     <section>

@@ -1,6 +1,6 @@
 {
   "name": "localpilot",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "description": "Chrome side-panel browser agent driven by a local LLM API.",
   "type": "module",
@@ -15,7 +15,7 @@
     "host:install": "node host/install.mjs",
     "host:uninstall": "node host/install.mjs --uninstall",
     "test:e2e:mcp": "node tests/e2e-mcp.mjs",
-    "test:all": "npm test && node tests/e2e.mjs && node tests/e2e-boss.mjs && node tests/e2e-mcp.mjs && node tests/e2e-resilience.mjs && node tests/e2e-phase-a.mjs && node tests/e2e-phase-b.mjs && node tests/e2e-phase-c.mjs && node tests/e2e-phase-d.mjs && node tests/e2e-phase-e.mjs && node tests/e2e-dialogs.mjs && node tests/e2e-antidebug.mjs && node tests/e2e-quickwins.mjs",
+    "test:all": "npm test && node tests/e2e.mjs && node tests/e2e-boss.mjs && node tests/e2e-mcp.mjs && node tests/e2e-resilience.mjs && node tests/e2e-phase-a.mjs && node tests/e2e-phase-b.mjs && node tests/e2e-phase-c.mjs && node tests/e2e-phase-d.mjs && node tests/e2e-phase-e.mjs && node tests/e2e-dialogs.mjs && node tests/e2e-antidebug.mjs && node tests/e2e-quickwins.mjs && node tests/e2e-agent.mjs",
     "test:e2e:resilience": "node tests/e2e-resilience.mjs",
     "logs:summary": "node scripts/summarize-logs.mjs",
     "test:e2e:phase-a": "node tests/e2e-phase-a.mjs",
@@ -25,7 +25,8 @@
     "test:e2e:phase-e": "node tests/e2e-phase-e.mjs",
     "test:e2e:dialogs": "node tests/e2e-dialogs.mjs",
     "test:e2e:antidebug": "node tests/e2e-antidebug.mjs",
-    "test:e2e:quickwins": "node tests/e2e-quickwins.mjs"
+    "test:e2e:quickwins": "node tests/e2e-quickwins.mjs",
+    "test:e2e:agent": "node tests/e2e-agent.mjs"
   },
   "devDependencies": {
     "playwright-core": "1.58.2"

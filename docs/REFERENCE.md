@@ -360,6 +360,44 @@ The agent can keep up to 10 short notes (300 characters each) per website, for e
 - **Recall:** the notes appear in the system prompt whenever it works on that site, marked as its own past observations, as data, not instructions.
 - **Review:** see and delete them in **Settings → Site notes**. The tool description tells the model never to store personal data or anything a page tells it to remember.
 
+## How the agent works each step
+
+- **The page comes with every step.** Each request ends with the current browser state: the tab's title and address, the other tabs, and the controls visible on screen with their refs. Controls that are new since the last step are starred (`*`). Only the latest state is sent; older ones are left out of the history. So the model rarely needs a `read_page` just to see where it is. Setting: "Send the page's visible controls with every step".
+- **Covered controls are left out.** A control that a pop-up, cookie banner or overlay sits on top of (checked at its centre) is dropped from the visible list and from screenshot numbers, and marked `covered` in a full `read_page`. The model then deals with the pop-up first instead of clicking something it cannot reach.
+- **Several actions per reply.** The model may make up to 5 tool calls in one reply (fill three fields, then click Submit). If an action changes the page (new address, new page, another tab), the remaining actions that click, type or fill are skipped with a note; reading actions still run.
+- **`done`.** The model finishes with `done { success, text }`. Before calling it, the instructions make it check that every part of the request is done and every fact comes from a page it read. `success: false` is shown as such.
+- **JSON steps (Settings → "How the model acts").** For models without tool calling, or small models that invent tool names: every reply is one JSON object, `{evaluation_previous_goal, memory, next_goal, actions[]}`, and the server is asked to enforce that shape (`response_format` `json_schema`: Ollama, LM Studio, llama.cpp, vLLM). Tool names are an enum in that schema, so a made-up tool cannot be produced. A server that refuses `json_schema` is asked for `json_object`, then for nothing. A reply that does not parse is sent back once with the error. The `memory` field is shown to the model at every step and survives summaries of old turns.
+- **Text-only models.** When a model (or a router) refuses screenshots, including routers that answer 429 "model lacks vision", LocalPilot stops sending images for the rest of the task and tells the model to read the page instead.
+
+## Reading pages without filling the context: `extract`, `search_page`
+
+- `extract { query, schema? }`: a helper model reads the page text (long pages in parts of 12 000 characters, up to 6) and answers only from it. With a JSON schema it returns structured data, merged across parts without repeats. Settings → "Helper model" picks a cheaper model for this (empty = the main model).
+- `search_page { pattern, regex?, context? }`: finds words or a regex in the page text and returns the matching lines with context. No model call.
+
+## The check after a task
+
+When a task that used tools ends, a separate model call (the helper model, if set) reads the request, the steps with their results, and the final answer, and decides: done, only partly done, or not done (with a reason, and whether a CAPTCHA or login blocked it). The panel shows ✓ or ⚠ under the answer. For a scheduled task, anything but "done" counts as failed: the notification says "needs attention" with the reason. Replies without any action are not checked. Setting: "Check each task when it ends".
+
+## Saved tasks: replay without the AI, allowed sites
+
+- **Replay.** When a saved task's run ends well (and passes the check), LocalPilot keeps its steps: every action, with the element it used as a fingerprint (role, name, id, name attribute, placeholder, link, a short CSS path), not as a ref. Looking around (`read_page`, `find`, screenshots, `web_search`) is not kept.
+- The next run replays those steps without any model call and reports the result of the last reading step (`get_page_text`, `extract` …). The panel shows each step as usual.
+- **When the page changed.** If a step's element cannot be found again, a step fails, or a click that changed the page last time changes nothing now, the AI takes over at that step. The replayed steps are already in its history, with a note saying which step failed and what was left. When that run ends well, its steps are saved instead, so the next replay works again.
+- A task's steps are dropped when its prompt or start URL is edited. Words added after `/name` make it a different task, so no replay. The task list shows "N saved steps" with a **Forget steps** button. The task form has a checkbox to turn replay off.
+- **Allowed sites.** "Only these sites" on a saved task limits it to those sites (and their subdomains): navigating, opening tabs or acting anywhere else is refused, including after a redirect.
+
+## Saved values
+
+Settings → **Saved values**, one per line: `name = value`, optionally `| site.com, other.org`. The model types `{{name}}` and LocalPilot fills in the value, only on the listed sites, and never into a password field. The model never sees the value: tool results, the page outline and the browser state show `{{name}}` instead. Do not store passwords there.
+
+## Plan checklist
+
+In "Plan, then act" mode, the approved plan becomes a checklist in the panel. The agent ticks steps off with `plan_update`, and the plan, with ticks, is part of its instructions at every step.
+
+## Save as PDF
+
+`save_pdf { filename? }` saves the current page (with backgrounds) as a PDF in `Downloads/LocalPilot`.
+
 ## Small-context helpers
 
 - **Repeats:** when the model opens an address, runs a web search, lists a folder or reads a file it already did in this conversation, the result says so ("you already opened this address once…"). Small models otherwise go in circles on made-up addresses.
@@ -380,6 +418,9 @@ The agent can keep up to 10 short notes (300 characters each) per website, for e
 | `form_input` | Sets inputs, textareas, selects, checkboxes and custom elements (web components) by ref; works with React and Vue fields |
 | `get_page_text` | Plain text of the main content |
 | `web_search` | Searches the web and returns a list of results: title, link and snippet (see **Web search**) |
+| `extract`, `search_page` | Answer a question from the page text with a helper model (optionally as JSON), or find lines in it without a model |
+| `save_pdf` | Saves the page as a PDF |
+| `done`, `plan_update` | Finish with a success flag; tick off steps of an approved plan |
 | `handle_dialog` | Answers a `confirm()` / `prompt()` / "Leave page?" dialog (see Safety) |
 | `tabs_context`, `tabs_create`, `switch_tab`, `tabs_close` | Lists (this or all windows), opens, switches and closes tabs |
 | `file_upload` | Attaches files to a file input: a file the user attached in the panel (`attachment`, no PC bridge needed), or a file from a PC root (`root` + `path`, e.g. `China/cv.pdf`, needs the PC bridge). Separate "upload … files to <site>" approval |
@@ -471,6 +512,7 @@ npm run test:e2e:phase-e     # testing mode on a buggy mock shop (every check, l
 npm run test:e2e:dialogs     # a dialog open before attach: reported at once, freed by handle_dialog; new tabs attached at once
 npm run test:e2e:antidebug   # a page that reloads or blanks itself under console capture: learned, stops, forgotten again
 npm run test:e2e:quickwins   # change reports, forgiving dropdowns, aliases, HTTP status, web_search, reconnect, pc_search, repeat notes, progress note
+npm run test:e2e:agent       # browser state every step, covered controls, several actions, done, JSON steps, extract, the check, replay, saved values, allowed sites, PDF, plan checklist
 npm run demo                 # regenerate examples/demo: the buggy demo shop (offline, no model)
 npm run demo:ai              # regenerate examples/demo-ai: LocalPilot's agent with your model on real sites (model from src/local-defaults.json or LP_BASE_URL / LP_MODEL / LP_API_KEY)
 npm run test:all       # everything

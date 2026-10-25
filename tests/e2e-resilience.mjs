@@ -42,7 +42,7 @@ try {
   await settings({ model: 'flaky-model' });
   let ev = await run('Sign me up as Ada on the Pro plan.');
   assert.ok(ev.some((e) => e.type === 'status' && /Retrying in 1s \(1\/3\)/.test(e.text)), 'retry status shown');
-  assert.deepEqual(ev.at(-1), { type: 'done', reason: 'end_turn' });
+  assert.deepEqual(ev.filter((e) => e.type !== 'judge').at(-1), { type: 'done', reason: 'end_turn' });
   assert.equal(await page.textContent('#out'), 'Hello, Ada (pro)');
   console.log('1. flaky model: retried twice, task done');
 
@@ -52,7 +52,7 @@ try {
   await settings({ model: 'dead-model', maxRetries: 1, fallbackModels: 'mock-model' });
   ev = await run('Sign me up as Ada on the Pro plan.');
   assert.ok(ev.some((e) => e.type === 'notice' && /fallback model "mock-model"/.test(e.text)));
-  assert.deepEqual(ev.at(-1), { type: 'done', reason: 'end_turn' });
+  assert.deepEqual(ev.filter((e) => e.type !== 'judge').at(-1), { type: 'done', reason: 'end_turn' });
   console.log('2. dead model: fell back to mock-model, task done');
 
   // 3. All attempts fail: error says so, offers Retry, and resuming keeps the conversation.
@@ -62,10 +62,10 @@ try {
   ev = await run('Sign me up as Ada on the Pro plan.');
   const err = ev.find((e) => e.type === 'error');
   assert.match(err.text, /HTTP 502[\s\S]*Gave up after 2 attempt\(s\)/);
-  assert.deepEqual(ev.at(-1), { type: 'done', reason: 'error', canRetry: true });
+  assert.deepEqual(ev.filter((e) => e.type !== 'judge').at(-1), { type: 'done', reason: 'error', canRetry: true });
   await settings({ model: 'mock-model' });
   ev = await run(null); // what the Retry button sends
-  assert.deepEqual(ev.at(-1), { type: 'done', reason: 'end_turn' });
+  assert.deepEqual(ev.filter((e) => e.type !== 'judge').at(-1), { type: 'done', reason: 'end_turn' });
   assert.equal(await page.textContent('#out'), 'Hello, Ada (pro)');
   console.log('3. exhausted: Retry offered, resumed run finished the task');
 

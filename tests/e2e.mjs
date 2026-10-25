@@ -69,7 +69,7 @@ try {
   assert.equal(await page.textContent('#out'), 'Hello, Ada (pro)');
   const final = events.filter((e) => e.type === 'assistant').pop();
   assert.match(final.text, /Hello, Ada \(pro\)/);
-  assert.deepEqual(events.at(-1), { type: 'done', reason: 'end_turn' });
+  assert.deepEqual(events.filter((e) => e.type !== 'judge').at(-1), { type: 'done', reason: 'end_turn' }); // the check after the task reports last
 
   // The screenshot reached the model as an image part after the tool message.
   const imageSent = requests.some((r) => r.messages.some((m) => Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url' && p.image_url.url.startsWith('data:image/jpeg;base64,'))));

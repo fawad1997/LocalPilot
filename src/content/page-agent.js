@@ -97,6 +97,20 @@
     return r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth;
   }
 
+  // Something else (a pop-up, cookie banner, overlay) is on top of the element's centre, so a
+  // click there would not reach it. Off-screen elements are not "covered".
+  function isCovered(el) {
+    const r = el.getBoundingClientRect();
+    if (r.bottom <= 0 || r.top >= innerHeight || r.right <= 0 || r.left >= innerWidth || !r.width || !r.height) return false;
+    const x = Math.min(Math.max(r.left + r.width / 2, 0), innerWidth - 1);
+    const y = Math.min(Math.max(r.top + r.height / 2, 0), innerHeight - 1);
+    const root = el.getRootNode();
+    const top = root.elementFromPoint ? root.elementFromPoint(x, y) : document.elementFromPoint(x, y);
+    if (!top || top === el || el.contains(top) || top.contains(el)) return false;
+    if (top.closest('label')?.control === el) return false;
+    return true;
+  }
+
   function isInteractive(el, role) {
     if (INTERACTIVE_ROLES.has(role)) return true;
     if (el.hasAttribute('onclick')) return true;
@@ -128,7 +142,7 @@
     yield* el.children;
   }
 
-  function buildTree({ filter = 'all', viewportOnly = false, maxChars = 30000, refId } = {}) {
+  function buildTree({ filter = 'all', viewportOnly = false, maxChars = 30000, refId, coverCheck = true } = {}) {
     const lines = [];
     let size = 0;
     let truncated = false;
@@ -141,15 +155,18 @@
       const visible = isVisible(el);
       const role = roleOf(el);
       let include = false;
+      let covered = false;
       if (role && visible && (!viewportOnly || inViewport(el))) {
         const interactive = isInteractive(el, role);
         if (interactiveOnly) include = interactive;
         else include = interactive || (role !== 'generic' && role !== 'paragraph' && role !== 'label') || (role === 'paragraph' && el.textContent.trim().length > 0);
+        covered = coverCheck && include && interactive && role !== 'option' && isCovered(el);
+        if (covered && viewportOnly) include = false; // the visible-controls view leaves out what cannot be clicked
       }
       let nextDepth = depth;
       if (include) {
         const name = nameOf(el, role);
-        const line = `${'  '.repeat(depth)}- ${role}${name ? ` "${name.replace(/"/g, "'")}"` : ''}${stateOf(el, role)} [${refFor(el)}]`;
+        const line = `${'  '.repeat(depth)}- ${role}${name ? ` "${name.replace(/"/g, "'")}"` : ''}${stateOf(el, role)}${covered ? ' covered' : ''} [${refFor(el)}]`;
         size += line.length + 1;
         if (size > maxChars) {
           truncated = true;
@@ -282,7 +299,7 @@
   let lastSnapshot = null;
 
   function outlineLines() {
-    return buildTree({ maxChars: 300000 }).split('\n').slice(3).map((l) => l.trim()).filter(Boolean);
+    return buildTree({ maxChars: 300000, coverCheck: false }).split('\n').slice(3).map((l) => l.trim()).filter(Boolean);
   }
 
   function snapshot() {
@@ -328,6 +345,74 @@
     input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
     input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
     return `Set ${ref} to "${value}"`;
+  }
+
+  // Element fingerprints for replaying saved steps: what the element is, not its ref (refs are
+  // numbered anew on every page load). matchFingerprint finds the best visible match, or null.
+  function cssPath(el) {
+    const parts = [];
+    for (let e = el; e && e.nodeType === 1 && parts.length < 6; e = e.parentElement) {
+      let part = e.tagName.toLowerCase();
+      if (e.id && !/\d{3,}/.test(e.id)) {
+        parts.unshift(`${part}#${CSS.escape(e.id)}`);
+        break;
+      }
+      const same = [...(e.parentElement?.children || [])].filter((s) => s.tagName === e.tagName);
+      if (same.length > 1) part += `:nth-of-type(${same.indexOf(e) + 1})`;
+      parts.unshift(part);
+    }
+    return parts.join(' > ');
+  }
+
+  // The input type of a ref's element, or of the focused element (no ref): saved values are never
+  // typed into password fields.
+  function fieldType(ref) {
+    const el = ref ? lookup(ref) : document.activeElement;
+    return el ? (el.getAttribute('type') || el.tagName).toLowerCase() : '';
+  }
+
+  function fingerprint(ref) {
+    const el = lookup(ref);
+    const role = roleOf(el);
+    return {
+      tag: el.tagName, role, name: nameOf(el, role), id: el.id || '', nameAttr: el.getAttribute('name') || '', type: el.getAttribute('type') || '',
+      placeholder: el.getAttribute('placeholder') || '', href: el.getAttribute('href') || '', css: cssPath(el),
+    };
+  }
+
+  function matchFingerprint(fp) {
+    let viaCss = null;
+    try {
+      viaCss = fp.css ? document.querySelector(fp.css) : null;
+    } catch {
+      viaCss = null;
+    }
+    let best = null;
+    let bestScore = 0;
+    for (const el of allElements(document.body)) {
+      if (el.tagName !== fp.tag || !isVisible(el)) continue;
+      const role = roleOf(el);
+      let score = 0;
+      if (fp.id && el.id === fp.id) score += 5;
+      if (fp.nameAttr && el.getAttribute('name') === fp.nameAttr) score += 4;
+      if (fp.name && nameOf(el, role) === fp.name) score += 4;
+      if (fp.placeholder && el.getAttribute('placeholder') === fp.placeholder) score += 2;
+      if (fp.href && el.getAttribute('href') === fp.href) score += 2;
+      if (el === viaCss) score += 2;
+      if (role === fp.role) score += 1;
+      if (fp.type && el.getAttribute('type') === fp.type) score += 1;
+      if (score > bestScore) {
+        best = el;
+        bestScore = score;
+      }
+    }
+    return best && bestScore >= 5 ? { ref: refFor(best), score: bestScore } : null;
+  }
+
+  // All visible text of the page (not only the main article), for extract and search_page.
+  function fullText(maxChars = 200000) {
+    const body = (document.body?.innerText || '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+    return { title: document.title, url: location.href, text: body.slice(0, maxChars) };
   }
 
   function pageText(maxChars = 50000) {
@@ -580,7 +665,7 @@
       const role = roleOf(el);
       if (!role || !isInteractive(el, role) || !isVisible(el) || !inViewport(el)) continue;
       const r = el.getBoundingClientRect();
-      if (r.width < 4 || r.height < 4) continue;
+      if (r.width < 4 || r.height < 4 || isCovered(el)) continue;
       const n = marks.length + 1;
       marks.push({ n, ref: refFor(el), role, name: nameOf(el, role) });
       const box = document.createElement('div');
@@ -597,5 +682,5 @@
     document.getElementById(MARKS_ID)?.remove();
   }
 
-  window.__lpAgent = { buildTree, find, locate, setValue, snapshot, changes, pageText, selectorText, detectLists, extractList, scrollListEnd, clickByText, quiet, waitFor, drawMarks, clearMarks, markFileInput, unmark };
+  window.__lpAgent = { buildTree, find, locate, setValue, snapshot, changes, fieldType, fingerprint, matchFingerprint, fullText, pageText, selectorText, detectLists, extractList, scrollListEnd, clickByText, quiet, waitFor, drawMarks, clearMarks, markFileInput, unmark };
 })();

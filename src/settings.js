@@ -54,6 +54,11 @@ export const DEFAULTS = {
   quantaraToken: '',
   newsFeeds: '', // RSS/Atom URLs for news_collect, one per line (empty = the built-in list)
   recordRuns: false, // save every run as an animated GIF in Downloads/LocalPilot
+  savedValues: [], // [{ name, value, sites }]: typed as {{name}}; the model never sees the value
+  helperModel: '', // cheaper model for extract and the check after tasks (empty = the main model)
+  judgeRuns: true, // after a task with actions, a model call checks whether it was really done
+  actionMode: 'tools', // 'tools' = native tool calling; 'json' = one server-enforced JSON step per reply
+  sendPageState: true, // send the address, tabs and visible controls with every step
   searchEngine: 'duckduckgo', // web_search tries this first, then the other built-in engines
   searchUrl: '', // optional own search page, e.g. a local SearXNG: http://localhost:8888/search?q={q}
 };

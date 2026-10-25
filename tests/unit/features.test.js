@@ -238,3 +238,77 @@ test('web_search tries the chosen engine first, then the others; an own search p
   assert.equal(searchPlan({}, 'a b')[0].url, 'https://html.duckduckgo.com/html/?q=a%20b');
   assert.deepEqual(searchPlan({ searchUrl: 'http://localhost:8888/search?q={q}' }, 'a&b'), [{ name: 'custom', url: 'http://localhost:8888/search?q=a%26b' }]);
 });
+
+// --- 0.9.0 agent quality ---------------------------------------------------------------
+
+const jm = await import('../../src/jsonmode.js');
+const ex = await import('../../src/extract.js');
+const sv = await import('../../src/savedvalues.js');
+const ag = await import('../../src/agent.js');
+const { parseDomains } = await import('../../src/tasks.js');
+
+test('JSON steps: lenient parsing, actions become tool calls, done ends', () => {
+  const a = jm.parseStep('```json\n{"evaluation_previous_goal":"ok","memory":"m1","next_goal":"click","actions":[{"tool":"computer","input":{"action":"left_click","ref":"ref_2"}},{"name":"find","args":{"query":"x"}}]}\n```');
+  assert.equal(a.step.memory, 'm1');
+  assert.deepEqual(a.uses.map((u) => [u.name, u.input]), [['computer', { action: 'left_click', ref: 'ref_2' }], ['find', { query: 'x' }]]);
+  assert.equal(a.done, null);
+  const d = jm.parseStep('Sure! {"memory":"","next_goal":"finish","action":{"tool":"done","input":{"success":false,"text":"Not found"}}}');
+  assert.deepEqual(d.done, { success: false, text: 'Not found' });
+  assert.equal(d.uses.length, 0);
+  assert.throws(() => jm.parseStep('I will click the button'), /no JSON object/);
+  assert.throws(() => jm.parseStep('{"actions": []}'), /empty/);
+  const many = jm.parseStep(JSON.stringify({ actions: Array.from({ length: 8 }, () => ({ tool: 'find', input: {} })) }));
+  assert.equal(many.uses.length, jm.MAX_JSON_ACTIONS);
+});
+
+test('JSON steps: the schema enumerates tool names; history becomes text', () => {
+  const schema = jm.stepSchema(['navigate', 'find']);
+  assert.deepEqual(schema.properties.actions.items.properties.tool.enum, ['navigate', 'find', 'done']);
+  const transcript = jm.toTextTranscript([
+    { role: 'user', content: [{ type: 'text', text: 'Do it' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'goal', step: { memory: 'm', actions: [{ tool: 'find', input: {} }] } }, { type: 'tool_use', id: 'a', name: 'find', input: {} }] },
+    { role: 'user', content: [{ type: 'tool_result', toolUseId: 'a', isError: true, content: [{ type: 'text', text: 'boom' }] }, { type: 'image', mediaType: 'image/png', data: 'x' }] },
+  ]);
+  assert.equal(transcript[1].content[0].text, JSON.stringify({ memory: 'm', actions: [{ tool: 'find', input: {} }] }));
+  assert.equal(transcript[2].content[0].text, 'Results of your actions:\n1. ERROR: boom');
+  assert.equal(transcript[2].content[1].type, 'image');
+});
+
+test('extract helpers: chunks split at lines, parts merge without repeats', () => {
+  const chunks = ex.chunkText(`${'a'.repeat(80)}\n`.repeat(30), 1000);
+  assert.ok(chunks.length >= 3 && chunks.every((c) => c.length <= 1000));
+  assert.deepEqual(ex.mergeParts([[{ a: 1 }, { a: 2 }], [{ a: 2 }, { a: 3 }]]), [{ a: 1 }, { a: 2 }, { a: 3 }]);
+  assert.deepEqual(ex.mergeParts([{ items: [1], title: '' }, { items: [2], title: 'T' }]), { items: [1, 2], title: 'T' });
+  const page = { url: 'u', text: 'one\nContact: a@b.org\nthree\nPrice 4' };
+  assert.match(ex.searchPage(page, { pattern: 'contact', context: 0 })[0].text, /^1 match\(es\) for "contact" on u:\n> 2: Contact: a@b\.org$/);
+  assert.match(ex.searchPage(page, { pattern: '[0-9]$', regex: true, context: 0 })[0].text, /4: Price 4/);
+  assert.match(ex.searchPage(page, { pattern: 'zzz' })[0].text, /^No match/);
+  assert.throws(() => ex.searchPage(page, { pattern: '(', regex: true }), /Bad regex/);
+});
+
+test('saved values: filled by name on allowed sites, masked back', () => {
+  const values = [{ name: 'email', value: 'me@x.org', sites: '' }, { name: 'phone', value: '0612', sites: 'shop.com' }];
+  assert.equal(sv.fillSavedValues('to {{email}}', values, 'a.com'), 'to me@x.org');
+  assert.equal(sv.fillSavedValues('{{phone}}', values, 'www.shop.com'), '0612');
+  assert.equal(sv.fillSavedValues('{{phone}}', values, 'eu.shop.com'), '0612');
+  assert.throws(() => sv.fillSavedValues('{{phone}}', values, 'evil.com'), /only be used on shop\.com/);
+  assert.throws(() => sv.fillSavedValues('{{iban}}', values, 'a.com'), /no saved value called \{\{iban\}\}/);
+  assert.equal(sv.maskSavedValues('Set ref_1 to "me@x.org"; tel 0612', values), 'Set ref_1 to "{{email}}"; tel {{phone}}');
+  assert.deepEqual(sv.savedValueNames(values), ['{{email}}', '{{phone}} (on shop.com)']);
+  assert.deepEqual(parseDomains('https://www.Example.com/x, shop.org  shop.org'), ['example.com', 'shop.org']);
+});
+
+test('plan items, memory and the page-state copy of the history', () => {
+  assert.deepEqual(ag.planItems('Plan\n1. Open\n2) Read it\nnotes').map((p) => [p.n, p.text]), [[1, 'Open'], [2, 'Read it']]);
+  const history = [
+    { role: 'assistant', content: [{ type: 'text', text: 'x', step: { memory: 'old' } }] },
+    { role: 'user', content: [{ type: 'text', text: 'r' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'y', step: { memory: 'new' } }] },
+  ];
+  assert.equal(ag.latestMemory(history), 'new');
+  assert.equal(ag.latestMemory([]), '');
+  const withState = ag.withPageState(history, 'STATE');
+  assert.equal(withState.length, 4);
+  assert.equal(history.length, 3, 'the history itself is unchanged');
+  assert.deepEqual(ag.withPageState(withState.slice(0, 2), 'S2')[1].content.map((b) => b.text), ['r', 'S2']);
+});

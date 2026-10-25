@@ -3,6 +3,8 @@
 //   schedule: { kind: 'daily' | 'weekdays', time: 'HH:MM' } | { kind: 'interval', minutes } | null
 //   notifyOn: 'always' | 'change' | 'keyword' (+ keyword)
 //   watch:    { selector } -> a page watch: no model; the text at `url` is compared with the last run
+//   replay:   { steps, savedAt } -> the steps of the last successful run, replayed without the model
+//             (useReplay false turns that off); dropped when the prompt or start URL changes
 const KEY = 'savedTasks';
 const RUNS_KEY = 'savedTaskRuns';
 export const ALARM_PREFIX = 'task:';
@@ -114,6 +116,10 @@ export async function saveTask(input) {
     notifyOn,
     keyword,
     watch,
+    useReplay: input.useReplay !== false,
+    allowedDomains: parseDomains(input.allowedDomains),
+    // The saved steps belong to this prompt and start page; a changed task is learned again.
+    replay: existing && existing.prompt === prompt && existing.url === url && !input.forgetReplay ? existing.replay || null : null,
     createdAt: existing?.createdAt || new Date().toISOString(),
   };
   const next = existing ? tasks.map((t) => (t.id === existing.id ? task : t)) : [...tasks, task];
@@ -129,6 +135,37 @@ export async function saveTask(input) {
     }
   }
   return task;
+}
+
+// "example.com, shop.example.org" or a list -> ['example.com', 'shop.example.org']
+export function parseDomains(v) {
+  const list = Array.isArray(v) ? v : String(v || '').split(/[\s,]+/);
+  return [...new Set(list.map((d) => String(d).trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/^www\./, '')).filter(Boolean))];
+}
+
+export const MAX_REPLAY_STEPS = 60;
+
+export async function saveReplay(id, steps) {
+  const all = await listTasks();
+  const task = all.find((t) => t.id === id);
+  if (!task || !steps.length || steps.length > MAX_REPLAY_STEPS) return null;
+  task.replay = { steps, savedAt: new Date().toISOString() };
+  await chrome.storage.local.set({ [KEY]: all });
+  return task;
+}
+
+export async function clearReplay(id) {
+  const all = await listTasks();
+  const task = all.find((t) => t.id === id);
+  if (!task) return;
+  task.replay = null;
+  await chrome.storage.local.set({ [KEY]: all });
+}
+
+// What a run of this task should replay: nothing when turned off, for page watches, or when
+// the user added words to the prompt (then it is a different task).
+export function replayFor(task, extra = '') {
+  return task && !task.watch && task.useReplay !== false && !String(extra || '').trim() ? task.replay?.steps || null : null;
 }
 
 export async function deleteTask(id) {

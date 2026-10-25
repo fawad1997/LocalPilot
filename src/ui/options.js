@@ -4,14 +4,25 @@ import { quantaraBaseUrl } from '../quantara.js';
 import { allNotes, removeNote } from '../sitenotes.js';
 
 const $ = (id) => document.getElementById(id);
-const TEXT_FIELDS = ['provider', 'baseUrl', 'model', 'apiKey', 'extraSystemPrompt', 'permissionMode', 'fallbackModels', 'quantaraUrl', 'quantaraToken', 'newsFeeds', 'searchEngine', 'searchUrl'];
+const TEXT_FIELDS = ['provider', 'baseUrl', 'model', 'apiKey', 'extraSystemPrompt', 'permissionMode', 'fallbackModels', 'quantaraUrl', 'quantaraToken', 'newsFeeds', 'searchEngine', 'searchUrl', 'actionMode', 'helperModel'];
 const NUMBER_FIELDS = ['maxSteps', 'maxTokens', 'temperature', 'screenshotMaxWidth', 'maxRetries', 'requestTimeoutSec', 'summarizeAfterTokens'];
-const BOOL_FIELDS = ['sendScreenshots', 'screenshotMarks', 'allowJavascriptTool', 'mcpBridge', 'logging', 'pauseOnBotCheck', 'streaming', 'quantaraEnabled', 'recordRuns'];
+const BOOL_FIELDS = ['judgeRuns', 'sendPageState', 'sendScreenshots', 'screenshotMarks', 'allowJavascriptTool', 'mcpBridge', 'logging', 'pauseOnBotCheck', 'streaming', 'quantaraEnabled', 'recordRuns'];
 
 let domains = [];
 
+// Saved values: one per line, "name = value" or "name = value | site.com, other.org".
+export function parseSavedValues(textValue) {
+  return String(textValue || '').split('\n').map((line) => line.match(/^\s*(\w+)\s*=\s*(.*?)\s*(?:\|\s*(.*))?$/)).filter((m) => m && m[2])
+    .map((m) => ({ name: m[1], value: m[2], sites: (m[3] || '').trim() }));
+}
+
+function formatSavedValues(values) {
+  return (values || []).map((v) => `${v.name} = ${v.value}${v.sites ? ` | ${v.sites}` : ''}`).join('\n');
+}
+
 function fill(settings) {
   for (const k of TEXT_FIELDS) $(k).value = settings[k] ?? '';
+  $('savedValues').value = formatSavedValues(settings.savedValues);
   for (const k of NUMBER_FIELDS) $(k).value = settings[k];
   for (const k of BOOL_FIELDS) $(k).checked = !!settings[k];
   domains = [...settings.approvedDomains];
@@ -19,7 +30,7 @@ function fill(settings) {
 }
 
 function read() {
-  const out = { approvedDomains: domains };
+  const out = { approvedDomains: domains, savedValues: parseSavedValues($('savedValues').value) };
   for (const k of TEXT_FIELDS) out[k] = $(k).value.trim();
   for (const k of NUMBER_FIELDS) out[k] = Number($(k).value);
   for (const k of BOOL_FIELDS) out[k] = $(k).checked;

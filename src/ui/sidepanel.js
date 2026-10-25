@@ -110,6 +110,28 @@ function addAssistant(text) {
   return add(el);
 }
 
+// The approved plan as a checklist the agent ticks off (plan_update); one card, updated in place.
+function renderPlan(items) {
+  let card = log.querySelector('.plan-card:last-of-type');
+  if (!card || card.dataset.done === '1') {
+    card = document.createElement('div');
+    card.className = 'msg plan-card';
+    add(card);
+  }
+  card.textContent = '';
+  const head = document.createElement('strong');
+  head.textContent = `Plan ${items.filter((i) => i.done).length}/${items.length}`;
+  const ul = document.createElement('ul');
+  for (const it of items) {
+    const li = document.createElement('li');
+    li.textContent = `${it.done ? '☑' : '☐'} ${it.n}. ${it.text}`;
+    li.className = it.done ? 'done' : '';
+    ul.append(li);
+  }
+  card.append(head, ul);
+  card.dataset.done = items.every((i) => i.done) ? '1' : '0';
+}
+
 function addNote(text, cls = 'note') {
   const el = document.createElement('div');
   el.className = `msg ${cls}`;
@@ -411,6 +433,13 @@ function onEvent(e) {
     case 'notice':
       addNote(e.text, 'notice');
       break;
+    case 'plan_progress':
+      renderPlan(e.items);
+      break;
+    case 'judge':
+      // The check after a task: did it really do what was asked?
+      addNote(`${e.verdict === 'success' ? '✓ Checked: done' : `⚠ Checked: ${e.verdict === 'partial' ? 'only partly done' : 'not done'}`}. ${e.reason}${e.blockedBy && e.blockedBy !== 'none' ? ` (blocked by: ${e.blockedBy})` : ''}`, e.verdict === 'success' ? 'judge-ok' : 'judge-bad');
+      break;
     case 'done':
       endLiveReply();
       if (e.reason === 'stopped') addNote('Stopped.');
@@ -647,10 +676,19 @@ function renderTasks() {
   }
   for (const t of savedTasks) {
     const li = document.createElement('li');
-    li.innerHTML = '<span class="task-name"></span><span class="task-when"></span><button type="button" data-act="run">Run</button><button type="button" data-act="edit">Edit</button><button type="button" data-act="del">Delete</button><span class="task-meta"></span><span class="task-meta task-last"></span>';
+    li.innerHTML = '<span class="task-name"></span><span class="task-when"></span><button type="button" data-act="run">Run</button><button type="button" data-act="edit">Edit</button><button type="button" data-act="del">Delete</button><span class="task-meta"></span><span class="task-meta task-steps"></span><span class="task-meta task-last"></span>';
     li.querySelector('.task-name').textContent = `/${t.name}`;
     li.querySelector('.task-when').textContent = [t.when ?? (t.daily ? `daily ${t.daily}` : ''), t.watch ? 'page watch' : '', t.notifyOn === 'change' ? 'notify on change' : t.notifyOn === 'keyword' ? `notify on "${t.keyword}"` : ''].filter(Boolean).join(' · ');
     li.querySelector('.task-meta').textContent = `${t.url ? `${t.url} — ` : ''}${t.watch ? `watching ${t.watch.selector || 'the main content'}` : t.prompt}`;
+    const stepsEl = li.querySelector('.task-steps');
+    if (t.replaySteps && t.useReplay !== false) {
+      stepsEl.textContent = `${t.replaySteps} saved steps: runs without the AI `;
+      const forget = document.createElement('button');
+      forget.type = 'button';
+      forget.textContent = 'Forget steps';
+      forget.addEventListener('click', () => port.postMessage({ type: 'task_forget_steps', id: t.id }));
+      stepsEl.append(forget);
+    } else stepsEl.remove();
     const last = li.querySelector('.task-last');
     if (t.lastRun) {
       last.textContent = `Last run ${new Date(t.lastRun.at).toLocaleString()}: ${t.lastRun.ok ? 'OK' : 'needs attention'} — ${t.lastRun.text.slice(0, 160)}`;
@@ -669,6 +707,8 @@ function renderTasks() {
       document.getElementById('task-keyword').value = t.keyword || '';
       document.getElementById('task-watch-on').checked = !!t.watch;
       document.getElementById('task-watch-selector').value = t.watch?.selector || '';
+      document.getElementById('task-replay').checked = t.useReplay !== false;
+      document.getElementById('task-sites').value = (t.allowedDomains || []).join(', ');
       syncTaskForm();
     });
     li.querySelector('[data-act="del"]').addEventListener('click', () => port.postMessage({ type: 'task_delete', id: t.id }));
@@ -690,6 +730,7 @@ function syncTaskForm() {
   document.getElementById('task-interval-wrap').hidden = kind !== 'interval';
   document.getElementById('task-keyword').hidden = document.getElementById('task-notify').value !== 'keyword';
   document.getElementById('task-watch-selector').hidden = !document.getElementById('task-watch-on').checked;
+  document.getElementById('task-replay-wrap').hidden = document.getElementById('task-watch-on').checked; // a watch never uses the AI anyway
 }
 for (const id of ['task-schedule', 'task-notify', 'task-watch-on']) document.getElementById(id).addEventListener('change', syncTaskForm);
 taskForm.addEventListener('reset', () => setTimeout(syncTaskForm));
@@ -710,6 +751,8 @@ taskForm.addEventListener('submit', (ev) => {
       notifyOn: val('task-notify'),
       keyword: val('task-keyword'),
       watch: watching ? { selector: val('task-watch-selector') } : null,
+      useReplay: document.getElementById('task-replay').checked,
+      allowedDomains: val('task-sites'),
     },
   });
   taskForm.reset();

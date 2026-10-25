@@ -243,13 +243,13 @@ export class OpenAIProvider {
           out.push({
             role: 'tool',
             tool_call_id: b.toolUseId,
-            content: (b.isError ? 'ERROR: ' : '') + (text || (images.length ? '(image attached in next message)' : 'ok')),
+            content: (b.isError ? 'ERROR: ' : '') + (text || (images.length ? (this.noVision ? '(screenshot not shown: this model cannot see images; use read_page or get_page_text)' : '(image attached in next message)') : 'ok')),
           });
           pendingImages.push(...images);
         } else if (b.type === 'text') {
           userParts.push({ type: 'text', text: b.text });
         } else if (b.type === 'image') {
-          userParts.push(imagePart(b));
+          userParts.push(this.noVision ? { type: 'text', text: '(image not shown: this model cannot see images)' } : imagePart(b));
         }
       }
       if (pendingImages.length && this.settings.sendScreenshots && !this.noVision) {
@@ -265,7 +265,9 @@ export class OpenAIProvider {
   }
 
   // onDelta(text) receives reply text as it streams (settings.streaming, default on).
-  async complete({ system, messages, tools, signal, onDelta }) {
+  // responseFormat { name, schema }: ask the server to force a JSON reply of that shape. Servers that
+  // reject json_schema are asked for plain json_object, then for nothing (remembered per provider).
+  async complete({ system, messages, tools, signal, onDelta, responseFormat }) {
     const s = this.settings;
     const body = {
       model: s.model,
@@ -274,6 +276,11 @@ export class OpenAIProvider {
       temperature: s.temperature,
       stream: false,
     };
+    if (responseFormat && this.jsonFormat !== 'none') {
+      body.response_format = this.jsonFormat === 'object'
+        ? { type: 'json_object' }
+        : { type: 'json_schema', json_schema: { name: responseFormat.name, schema: responseFormat.schema, strict: false } };
+    }
     if (tools?.length) {
       body.tools = tools.map((t) => ({
         type: 'function',
@@ -292,8 +299,18 @@ export class OpenAIProvider {
     try {
       data = await postJson(url, body, headers, signal, onDelta);
     } catch (err) {
-      if (!clientError(err)) throw err;
       const hadImages = body.messages.some((m) => Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url'));
+      // A text-only model refused the screenshot. Routers may say so with a 429 ("model lacks vision").
+      if (hadImages && !this.noVision && err.status >= 400 && err.status < 500 && /vision|image/i.test(err.message)) {
+        this.noVision = true;
+        return this.complete({ system, messages, tools, signal, onDelta, responseFormat });
+      }
+      if (!clientError(err)) throw err;
+      if (body.response_format) {
+        // The server does not accept this response_format: step down (json_schema -> json_object -> none).
+        this.jsonFormat = body.response_format.type === 'json_schema' ? 'object' : 'none';
+        return this.complete({ system, messages, tools, signal, onDelta, responseFormat });
+      }
       if (body.stream && !hadImages) {
         // Server does not support streaming (or stream_options): ask again without it.
         this.noStream = true;
