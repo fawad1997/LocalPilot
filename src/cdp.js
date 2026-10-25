@@ -16,8 +16,63 @@ function target(tabId) {
   return { tabId };
 }
 
+// Sites with anti-devtools scripts. With Runtime.enable on, Chrome serializes every console
+// call for us, which makes console.table() measurably slow; such scripts time it and reload
+// or blank the page (BOSS直聘 and 猎聘 do this; 51job and 智联 are listed as the same kind of
+// job board). Console capture is skipped there; clicks, reading and screenshots still work.
+// Other sites are learned at run time (see watchSelfReload) and kept in storage.
+const QUIET_RUNTIME_HOSTS = /(^|\.)(zhipin|liepin|51job|zhaopin)\.com$/i;
+const QUIET_KEY = 'quietHosts';
+const learnedQuiet = new Set();
+const learnedReady = chrome.storage.local.get(QUIET_KEY).then((v) => {
+  for (const h of v[QUIET_KEY] || []) learnedQuiet.add(h);
+}).catch(() => {});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes[QUIET_KEY]) return;
+  learnedQuiet.clear();
+  for (const h of changes[QUIET_KEY].newValue || []) learnedQuiet.add(h);
+});
+
+function hostOf(url) {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
+}
+
+function quietRuntime(url) {
+  const host = hostOf(url);
+  return !!host && (QUIET_RUNTIME_HOSTS.test(host) || learnedQuiet.has(host));
+}
+
+async function learnQuiet(host) {
+  if (learnedQuiet.has(host)) return;
+  learnedQuiet.add(host);
+  const v = await chrome.storage.local.get(QUIET_KEY).catch(() => ({}));
+  const hosts = new Set(v[QUIET_KEY] || []).add(host);
+  await chrome.storage.local.set({ [QUIET_KEY]: [...hosts] }).catch(() => {});
+}
+
+// Console capture on or off for the page the tab shows (or is about to show).
+function setRuntime(tabId, state, on) {
+  if (state.runtimeOn === on) return;
+  state.runtimeOn = on;
+  send(tabId, on ? 'Runtime.enable' : 'Runtime.disable').catch(() => {});
+}
+
+// Input and page scripts we run can make the page navigate; that is not the page reacting to us.
+const AGENT_ACTION_GRACE_MS = 2000;
+
 export function send(tabId, method, params = {}) {
+  if (method.startsWith('Input.') || method === 'Runtime.evaluate') markAgentAction(tabId);
   return chrome.debugger.sendCommand(target(tabId), method, params);
+}
+
+export function markAgentAction(tabId) {
+  const state = stores.get(tabId);
+  if (state) state.lastAgentAction = Date.now();
 }
 
 function storeFor(tabId) {
@@ -32,6 +87,12 @@ function storeFor(tabId) {
       capturePatterns: new Set(),
       captured: [],
       capturedBytes: 0,
+      runtimeOn: false,
+      lastAgentAction: 0,
+      mainFrameId: null,
+      pageUrl: '', // last real (non-blank) page URL in the main frame
+      selfReloads: [], // times the page reloaded itself while console capture was on
+      notices: [], // things the model should hear about after its next tool call
     });
   }
   return stores.get(tabId);
@@ -40,6 +101,7 @@ function storeFor(tabId) {
 export async function attach(tabId) {
   const state = storeFor(tabId);
   if (attached.has(tabId)) return state;
+  await learnedReady;
   try {
     await chrome.debugger.attach(target(tabId), '1.3');
   } catch (err) {
@@ -48,11 +110,17 @@ export async function attach(tabId) {
   }
   attached.add(tabId);
   state.inflight.clear(); // requests from before this attachment will never report back
+  const { url } = await chrome.tabs.get(tabId).catch(() => ({}));
+  if (url && !url.startsWith('about:')) state.pageUrl = url;
+  state.runtimeOn = !quietRuntime(url);
+  state.selfReloads = [];
   const enabling = Promise.all([
     send(tabId, 'Page.enable'),
-    send(tabId, 'Runtime.enable'),
+    ...(state.runtimeOn ? [send(tabId, 'Runtime.enable')] : []),
     send(tabId, 'Network.enable'),
-  ]);
+  ]).then(() => send(tabId, 'Page.getFrameTree')).then(({ frameTree }) => {
+    state.mainFrameId = frameTree.frame.id;
+  });
   const answered = await Promise.race([enabling.then(() => true), new Promise((r) => setTimeout(() => r(false), ENABLE_TIMEOUT_MS))]);
   if (!answered) {
     // The page does not answer: almost always a dialog that opened before we attached. Chrome
@@ -72,6 +140,12 @@ export async function attach(tabId) {
 // Keep pages interactive even when the window is not focused.
 function emulateFocus(tabId) {
   return send(tabId, 'Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {});
+}
+
+// Notices for the model (e.g. "this site reacts to debugging"), each reported once.
+export function takeNotices(tabId) {
+  const state = stores.get(tabId);
+  return state ? state.notices.splice(0) : [];
 }
 
 export function isAttached(tabId) {
@@ -129,6 +203,8 @@ export function getState(tabId) {
 
 chrome.debugger.onDetach.addListener((source) => {
   attached.delete(source.tabId);
+  const state = stores.get(source.tabId);
+  if (state) state.runtimeOn = false;
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
@@ -197,16 +273,58 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
     case 'Page.javascriptDialogClosed':
       state.pendingDialog = null;
       break;
+    case 'Page.frameRequestedNavigation':
+      if (params.frameId === state.mainFrameId) watchSelfReload(source.tabId, state, params);
+      break;
+    case 'Page.frameStartedNavigating':
+      // Before the new page runs any script: no console capture on a quiet site.
+      if (params.frameId === state.mainFrameId && quietRuntime(params.url)) setRuntime(source.tabId, state, false);
+      break;
     case 'Page.frameNavigated': {
       if (!params.frame.parentId) {
+        state.mainFrameId = params.frame.id;
         state.console.length = 0;
         state.inflight.clear();
+        const { url } = params.frame;
+        if (!url.startsWith('about:')) state.pageUrl = url;
+        setRuntime(source.tabId, state, !quietRuntime(url));
       }
       break;
     }
     default:
   }
 });
+
+// ---------------------------------------------------------------------------
+// Pages that reload or blank themselves because the debugger reads their console. Only
+// navigations the page starts itself count, not ones right after our own actions. Blanking
+// once, or reloading twice within SELF_RELOAD_WINDOW_MS, turns console capture off for that
+// site from now on, and the page is loaded once more.
+
+const SELF_RELOAD_WINDOW_MS = 30000;
+
+function watchSelfReload(tabId, state, params) {
+  if (!state.runtimeOn || !state.pageUrl) return;
+  const sameUrl = params.url.split('#')[0] === state.pageUrl.split('#')[0];
+  const blanking = params.url.startsWith('about:blank'); // never caused by our clicks or typing
+  if (!blanking && Date.now() - state.lastAgentAction < AGENT_ACTION_GRACE_MS) return;
+  if (!blanking && !(sameUrl && ['reload', 'scriptInitiated'].includes(params.reason))) return;
+  const now = Date.now();
+  state.selfReloads = state.selfReloads.filter((t) => now - t < SELF_RELOAD_WINDOW_MS);
+  state.selfReloads.push(now);
+  if (!blanking && state.selfReloads.length < 2) return;
+  state.selfReloads = [];
+  const url = state.pageUrl;
+  const host = hostOf(url);
+  setRuntime(tabId, state, false);
+  learnQuiet(host);
+  state.notices.push(
+    `${host} reloads or blanks itself while LocalPilot reads its console (anti-debugging). Console capture is now off for ${host} ` +
+      '(read_console_messages stays empty there) and the page was loaded again; clicking, reading and screenshots work as before.',
+  );
+  // A reload is already on its way and now loads without console capture; a blank page is replaced by the page again.
+  if (!sameUrl) setTimeout(() => send(tabId, 'Page.navigate', { url }).catch(() => {}), 300);
+}
 
 // ---------------------------------------------------------------------------
 // JavaScript dialogs. alert() is accepted and reported. confirm(), prompt() and

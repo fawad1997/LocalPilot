@@ -394,6 +394,11 @@ The agent can keep up to 10 short notes (300 characters each) per website, for e
   - "Are you sure you want to delete…?" is never auto-confirmed.
   - **A dialog that opened before LocalPilot attached to the tab** (for example an alert shown while the page loads, before you asked anything) is invisible to Chrome's debugger, and Chrome cannot answer it. LocalPilot notices that the page has stopped answering (after 1.5 s) and tells the model, instead of hanging. The model then asks you to click OK or Cancel in the tab, or calls `handle_dialog`, which reloads the page to close it (like Cancel). The reloaded page is fully attached, so its own dialogs are then handled as above.
   - Tabs that a controlled page opens (links with `target=_blank`, `window.open`) are attached as soon as they are created, so their dialogs are caught too.
+- **Sites that block debugging:** some sites check whether a debugger reads their console (it makes `console.table()` slow) and then reload or blank the page. LocalPilot does not read the console on BOSS直聘, 猎聘, 51job and 智联. On any other site it watches for this:
+  - The page reloads itself twice within 30 s, or jumps to a blank page, without LocalPilot clicking or typing just before.
+  - LocalPilot then stops reading that site's console, remembers the site, loads the page again once, and tells the model. Clicking, reading, screenshots and network capture keep working; only `read_console_messages` stays empty there.
+  - Settings → **Sites that block debugging** lists the learned sites. **Forget** turns console reading back on for one.
+  - A site that refreshes itself on a timer for its own reasons can end up on the list too. Nothing breaks; you only lose its console messages.
 - Chats are kept in session storage, so they survive a background-worker restart. Screenshot pixels are not stored. Chats are cleared when the tab or browser closes.
 
 ## Layout
@@ -436,6 +441,7 @@ npm run test:e2e:phase-c     # recipe registry, mock Liepin/51job/Zhaopin/Linked
 npm run test:e2e:phase-d     # mock Quantara (status, analysis, halt asks every time), interval/weekday schedules, no-AI page watch, extract_list paging, calendar (page data + table, UTC self-check), news feeds, site notes
 npm run test:e2e:phase-e     # testing mode on a buggy mock shop (every check, logout never opened, report + GIF), gif_recorder, record every run, /test and /record
 npm run test:e2e:dialogs     # a dialog open before attach: reported at once, freed by handle_dialog; new tabs attached at once
+npm run test:e2e:antidebug   # a page that reloads or blanks itself under console capture: learned, stops, forgotten again
 npm run demo                 # regenerate examples/demo: the buggy demo shop (offline, no model)
 npm run demo:ai              # regenerate examples/demo-ai: LocalPilot's agent with your model on real sites (model from src/local-defaults.json or LP_BASE_URL / LP_MODEL / LP_API_KEY)
 npm run test:all       # everything

@@ -52,6 +52,35 @@ function renderDomains() {
   }
 }
 
+// Learned by cdp.js when a site reloads itself under console capture.
+async function renderQuietHosts() {
+  const ul = $('quiet-hosts');
+  ul.textContent = '';
+  const hosts = (await chrome.storage.local.get('quietHosts')).quietHosts || [];
+  if (!hosts.length) {
+    const li = document.createElement('li');
+    li.className = 'hint';
+    li.textContent = 'None yet.';
+    ul.appendChild(li);
+    return;
+  }
+  for (const host of [...hosts].sort()) {
+    const li = document.createElement('li');
+    const span = document.createElement('span');
+    span.textContent = host;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = 'Forget';
+    btn.addEventListener('click', async () => {
+      const now = (await chrome.storage.local.get('quietHosts')).quietHosts || [];
+      await chrome.storage.local.set({ quietHosts: now.filter((h) => h !== host) });
+      renderQuietHosts();
+    });
+    li.append(span, btn);
+    ul.appendChild(li);
+  }
+}
+
 async function renderNotes() {
   const ul = $('site-notes');
   ul.textContent = '';
@@ -151,3 +180,4 @@ $('save').addEventListener('click', async () => {
 
 fill(await loadSettings());
 renderNotes();
+renderQuietHosts();

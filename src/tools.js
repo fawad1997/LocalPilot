@@ -756,6 +756,7 @@ export async function runTool(ctx, rawName, rawInput = {}) {
   await checkApproval(ctx, name, input);
   ctx.lastPoint = null;
   ctx.lastLabel = null;
+  cdp.markAgentAction(ctx.tabId);
   const blocks = await runToolInner(ctx, name, input);
   if (ctx.recording && recordsAfter(name, input)) await recordFrame(ctx, describeAction(name, input, ctx.lastLabel));
   const blocked = cdp.getState(ctx.tabId)?.pendingDialog; // page scripts would hang now
@@ -766,6 +767,14 @@ export async function runTool(ctx, rawName, rawInput = {}) {
       if (firstText) firstText.text += note;
       else blocks.unshift(text(note.trim()));
     }
+  }
+  const notices = cdp.takeNotices(ctx.tabId);
+  if (notices.length) {
+    const firstText = blocks.find((b) => b.type === 'text');
+    const note = notices.map((n) => `
+${n}`).join('');
+    if (firstText) firstText.text += note;
+    else blocks.unshift(text(note.trim()));
   }
   return blocks;
 }
