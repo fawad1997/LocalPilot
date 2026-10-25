@@ -211,9 +211,13 @@
     el.scrollIntoView({ block: 'center', behavior: 'instant' });
     el.focus();
     if (el.tagName === 'SELECT') {
-      const opt = [...el.options].find((o) => o.value === String(value) || o.text.trim() === String(value));
-      if (!opt) throw new Error(`No option "${value}" in ${ref}. Options: ${[...el.options].map((o) => o.text.trim()).join(', ')}`);
+      const opt = matchOption([...el.options], String(value), ref);
       el.value = opt.value;
+      if (opt.text.trim() !== String(value) && opt.value !== String(value)) {
+        el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+        return `Set ${ref} to "${opt.text.trim()}" (the closest option to "${value}")`;
+      }
     } else if (el.type === 'checkbox' || el.type === 'radio') {
       const want = value === true || value === 'true' || value === 'on' || value === 1;
       if (el.checked !== want) el.click();
@@ -248,6 +252,72 @@
     el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
     el.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
     return `Set ${ref} to "${value}"`;
+  }
+
+  // Exact value or text first; then, if exactly one option fits, the same text in any case,
+  // an option that starts with the value ("Mobile" -> "Mobile Phone"), the value starting with
+  // an option ("Guangdong Sheng" -> "Guangdong"), or an option containing it.
+  function matchOption(options, value, ref) {
+    const exact = options.find((o) => o.value === value || o.text.trim() === value);
+    if (exact) return exact;
+    const norm = (t) => t.toLowerCase().replace(/\s+/g, ' ').trim();
+    const v = norm(value);
+    const named = options.filter((o) => norm(o.text).length >= 2);
+    const stages = [
+      (t) => t === v,
+      (t) => v.length >= 2 && t.startsWith(v),
+      (t) => t.length >= 4 && v.startsWith(t),
+      (t) => v.length >= 3 && t.includes(v),
+    ];
+    for (const fits of stages) {
+      const hits = named.filter((o) => fits(norm(o.text)) || fits(norm(o.value)));
+      if (hits.length === 1) return hits[0];
+      if (hits.length > 1) throw new Error(`"${value}" fits several options in ${ref}: ${hits.map((o) => o.text.trim()).join(', ')}. Pass the exact option text.`);
+    }
+    throw new Error(`No option "${value}" in ${ref}. Options: ${options.map((o) => o.text.trim()).join(', ')}`);
+  }
+
+  // What an action changed: snapshot() before it, changes() after. A fresh page (new
+  // document) has no snapshot, so changes() then returns the start of its outline instead.
+  let lastSnapshot = null;
+
+  function outlineLines() {
+    return buildTree({ maxChars: 300000 }).split('\n').slice(3).map((l) => l.trim()).filter(Boolean);
+  }
+
+  function snapshot() {
+    lastSnapshot = { url: location.href, title: document.title, lines: outlineLines() };
+    return { url: lastSnapshot.url, title: lastSnapshot.title };
+  }
+
+  function changes({ maxAdded = 25, maxRemoved = 10 } = {}) {
+    if (!lastSnapshot) {
+      const outline = buildTree({ filter: 'interactive', viewportOnly: true, maxChars: 2000 }).split('\n').slice(3).join('\n');
+      return { newPage: true, url: location.href, title: document.title, outline };
+    }
+    const lines = outlineLines();
+    const left = new Map();
+    for (const l of lastSnapshot.lines) left.set(l, (left.get(l) || 0) + 1);
+    const added = [];
+    for (const l of lines) {
+      const n = left.get(l);
+      if (n) left.set(l, n - 1);
+      else added.push(l);
+    }
+    const removed = [...left].flatMap(([l, n]) => Array(n).fill(l));
+    const out = {
+      newPage: false,
+      url: location.href,
+      title: document.title,
+      urlChanged: location.href !== lastSnapshot.url,
+      titleChanged: document.title !== lastSnapshot.title,
+      added: added.slice(0, maxAdded),
+      addedTotal: added.length,
+      removed: removed.slice(0, maxRemoved),
+      removedTotal: removed.length,
+    };
+    lastSnapshot = { url: location.href, title: document.title, lines };
+    return out;
   }
 
   // A web component that wraps a native field in its shadow root.
@@ -527,5 +597,5 @@
     document.getElementById(MARKS_ID)?.remove();
   }
 
-  window.__lpAgent = { buildTree, find, locate, setValue, pageText, selectorText, detectLists, extractList, scrollListEnd, clickByText, quiet, waitFor, drawMarks, clearMarks, markFileInput, unmark };
+  window.__lpAgent = { buildTree, find, locate, setValue, snapshot, changes, pageText, selectorText, detectLists, extractList, scrollListEnd, clickByText, quiet, waitFor, drawMarks, clearMarks, markFileInput, unmark };
 })();

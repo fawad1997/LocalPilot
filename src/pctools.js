@@ -24,6 +24,23 @@ export function pcToolDefinitions(host) {
       input_schema: { type: 'object', properties: { root: rootProp, path: { type: 'string' }, max_bytes: { type: 'number' } }, required: ['root', 'path'] },
     },
     {
+      name: 'pc_search',
+      description:
+        'Find files on the PC in one call instead of listing folder after folder. name: part of a file name or a pattern (cv, *.pdf, report_202?.csv); ' +
+        'text: words inside text files (.txt .md .csv .json .html …; not PDF or Word). Give either or both. Searches subfolders.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          root: rootProp,
+          path: { type: 'string', description: 'Folder to search in, relative to the root (default: the whole root).' },
+          name: { type: 'string' },
+          text: { type: 'string' },
+          max_results: { type: 'number', description: 'Default 50.' },
+        },
+        required: ['root'],
+      },
+    },
+    {
       name: 'pc_write_file',
       description: 'Write a text file on the PC (.csv .json .md .txt .html .tsv only). Refuses to overwrite unless overwrite is true.',
       input_schema: {
@@ -150,6 +167,12 @@ export async function runPcOrCaptureTool(ctx, name, input) {
     case 'pc_read_file': {
       const res = await pc.call('read_file', { root: input.root, path: input.path, maxBytes: Math.min(Number(input.max_bytes) || 20000, 200000) }); // keep the model's context small
       return [text(`${res.path} (${res.size} B${res.truncated ? ', truncated' : ''})\n${res.content}`)];
+    }
+    case 'pc_search': {
+      const res = await pc.call('search', { root: input.root, path: input.path || '.', name: input.name, text: input.text, limit: input.max_results });
+      const lines = res.results.map((r) => `${r.type === 'dir' ? '[dir] ' : ''}${r.path}${r.size != null ? `  (${r.size} B, ${r.modified.slice(0, 10)})` : ''}${r.line ? `\n    line ${r.line}: ${r.snippet}` : ''}`);
+      const head = `${res.results.length} match(es) in ${res.path} (${res.scanned} entries looked at${res.truncated ? `; ${res.truncated}` : ''})`;
+      return [text(`${head}\n${lines.join('\n') || 'Nothing found. Try a shorter name, a pattern like *.pdf, or another folder.'}`)];
     }
     case 'pc_write_file': {
       const res = await pc.call('write_file', { root: input.root, path: input.path, content: input.content, overwrite: !!input.overwrite });

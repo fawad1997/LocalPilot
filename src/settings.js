@@ -54,6 +54,8 @@ export const DEFAULTS = {
   quantaraToken: '',
   newsFeeds: '', // RSS/Atom URLs for news_collect, one per line (empty = the built-in list)
   recordRuns: false, // save every run as an animated GIF in Downloads/LocalPilot
+  searchEngine: 'duckduckgo', // web_search tries this first, then the other built-in engines
+  searchUrl: '', // optional own search page, e.g. a local SearXNG: http://localhost:8888/search?q={q}
 };
 
 // Optional machine-local defaults (e.g. your API key), kept out of version control.

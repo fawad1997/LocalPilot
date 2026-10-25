@@ -182,3 +182,59 @@ test('tool calls from small models: leaked format tokens and bare actions are ma
   assert.deepEqual(normalizeToolCall('click', { ref: 'ref_2' }), { name: 'computer', input: { ref: 'ref_2', action: 'left_click' } });
   assert.deepEqual(normalizeToolCall('navigate', { url: 'x' }), { name: 'navigate', input: { url: 'x' } });
 });
+
+// --- 0.8.0 quick wins -----------------------------------------------------------------
+
+const { formatChanges } = await import('../../src/tools.js');
+const { repeatKey, repeatNote, noopNote } = await import('../../src/agent.js');
+const { searchPlan } = await import('../../src/websearch.js');
+
+test('aliases other agents use map to real tools', async () => {
+  const { normalizeToolCall } = await import('../../src/tools.js');
+  assert.deepEqual(normalizeToolCall('search', { q: 'cats' }), { name: 'web_search', input: { q: 'cats', query: 'cats' } });
+  assert.deepEqual(normalizeToolCall('Google', { query: 'dogs' }), { name: 'web_search', input: { query: 'dogs' } });
+  assert.deepEqual(normalizeToolCall('computer', { action: 'find', query: 'Submit' }), { name: 'find', input: { query: 'Submit' } });
+  assert.deepEqual(normalizeToolCall('computer', { action: 'down' }), { name: 'computer', input: { action: 'scroll', scroll_direction: 'down' } });
+  assert.deepEqual(normalizeToolCall('scroll_up', {}), { name: 'computer', input: { action: 'scroll', scroll_direction: 'up' } });
+  assert.deepEqual(normalizeToolCall('goto', { url: 'a.com' }), { name: 'navigate', input: { url: 'a.com' } });
+  assert.deepEqual(normalizeToolCall('computer', { action: 'press', text: 'Enter' }), { name: 'computer', input: { action: 'key', text: 'Enter' } });
+});
+
+test('repeated calls are recognised across spelling differences', () => {
+  assert.equal(repeatKey('navigate', { url: 'https://www.a.com/x/' }), repeatKey('goto', { url: 'http://a.com/x#top' }));
+  assert.equal(repeatKey('navigate', { url: 'back' }), null);
+  assert.equal(repeatKey('search', { q: 'Dr  Aleem' }), repeatKey('web_search', { query: 'dr aleem' }));
+  assert.equal(repeatKey('read_page', {}), null);
+  const messages = [
+    { role: 'assistant', content: [{ type: 'tool_use', id: 'a', name: 'navigate', input: { url: 'a.com/faculty' } }] },
+    { role: 'user', content: [] },
+    { role: 'assistant', content: [{ type: 'tool_use', id: 'b', name: 'navigate', input: { url: 'https://a.com/faculty/' } }] },
+  ];
+  assert.match(repeatNote(messages, { id: 'b', name: 'navigate', input: { url: 'https://a.com/faculty/' } }), /already opened this address once/);
+  assert.equal(repeatNote(messages, { id: 'c', name: 'navigate', input: { url: 'a.com/people' } }), '');
+});
+
+test('a click that changes nothing twice gets a nudge', () => {
+  const noops = new Map();
+  const nothing = 'left_click at (1, 2) CSS px.\nNo visible change on the page.';
+  assert.equal(noopNote(noops, 'computer', { action: 'left_click', ref: 'ref_3' }, nothing), '');
+  assert.equal(noopNote(noops, 'computer', { action: 'left_click', ref: 'ref_4' }, nothing), '');
+  assert.match(noopNote(noops, 'click', { ref: 'ref_3' }, nothing), /left click has now changed nothing 2 times/);
+  assert.equal(noopNote(noops, 'computer', { action: 'left_click', ref: 'ref_3' }, 'left_click.\nPage changes:\nAppeared (1):\n- button "x" [ref_9]'), '');
+});
+
+test('change reports read well', () => {
+  assert.equal(formatChanges(null), '');
+  assert.equal(formatChanges({ newPage: false, added: [], addedTotal: 0, removed: [], removedTotal: 0 }), '\nNo visible change on the page.');
+  const many = formatChanges({ newPage: false, urlChanged: true, url: 'https://a/b', added: ['- button "Close" [ref_2]'], addedTotal: 40, removed: ['- link "Sign in" [ref_1]'], removedTotal: 1 });
+  assert.match(many, /^\nPage changes:\nURL is now https:\/\/a\/b\nAppeared \(40\):\n- button "Close" \[ref_2\]\n… and 39 more \(read_page shows all\)\nGone \(1\):\n- link "Sign in" \[ref_1\]$/);
+  assert.match(formatChanges({ newPage: true, title: 'Next', url: 'https://a/n', outline: '- link "Home" [ref_1]' }), /^\nNow on a new page: "Next" https:\/\/a\/n\nVisible controls:\n- link "Home"/);
+});
+
+test('web_search tries the chosen engine first, then the others; an own search page replaces them', () => {
+  assert.deepEqual(searchPlan({}, 'a b').map((e) => e.name), ['duckduckgo', 'bing', 'google']);
+  assert.deepEqual(searchPlan({ searchEngine: 'bing' }, 'x').map((e) => e.name), ['bing', 'duckduckgo', 'google']);
+  assert.deepEqual(searchPlan({ searchEngine: 'bing' }, 'x', 'google').map((e) => e.name), ['google', 'duckduckgo', 'bing']);
+  assert.equal(searchPlan({}, 'a b')[0].url, 'https://html.duckduckgo.com/html/?q=a%20b');
+  assert.deepEqual(searchPlan({ searchUrl: 'http://localhost:8888/search?q={q}' }, 'a&b'), [{ name: 'custom', url: 'http://localhost:8888/search?q=a%26b' }]);
+});

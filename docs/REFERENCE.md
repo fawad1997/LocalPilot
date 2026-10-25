@@ -154,9 +154,20 @@ What the sandbox enforces:
 - The agent can only write `.csv .json .md .txt .html .tsv` files. It never overwrites a file unless asked, and it cannot create scripts.
 - Scripts run with `node`, with no shell, a 2-minute timeout and capped output.
 - Dotfiles and `node_modules` are hidden from directory listings.
+- `pc_search` finds files in a root by name (part of the name, or a pattern like `*.pdf` or `cv_*`) and/or by text inside text files (`.txt .md .csv .json .html` and similar; not PDF or Word). It looks through subfolders, skips dotfiles, `node_modules` and build folders, and stops after 50 matches, 50 000 entries or 8 seconds.
 - Every call is logged to `host/localpilot-host.log`.
 
 PC writes and script runs go through the same permission modes as websites (e.g. "PC folder: jobs").
+
+## Web search
+
+`web_search` searches the web from a background tab of your own browser (your cookies and consent choices apply) and returns a numbered list: title, link and snippet. The tab is closed afterwards. The model then opens a result with `navigate`.
+- **Engines:** DuckDuckGo first, then Bing, then Google if one fails or shows a bot check. Settings → **Web search** picks the first one. The model can also ask for one engine.
+- **Own search page:** set "Own search page instead" to any results page with `{q}` for the query, for example a local SearXNG (`http://localhost:8888/search?q={q}`). Then only that page is used.
+- **Approval:** in the "ask" permission modes, the first search asks about "web search"; that one answer covers every engine.
+- Bot checks on the search page are never solved: that engine is skipped. When an engine gives nothing, the reply names the page it showed (title and address), so you can see why.
+- Google sometimes links results through its own redirect (`google.com.hk/goto?url=…`). Those results show the site's address as Google prints it, plus the redirect link, which opens the page.
+- Checked live on 2026-10-25 in a plain Chrome profile: DuckDuckGo, Bing and Google all returned the expected pages for English and Chinese queries. A browser started by automation tools (Playwright, headless) gets bot checks or worse results instead; your normal Chrome does not carry that marking.
 
 ## Saving website data: response capture
 
@@ -351,6 +362,10 @@ The agent can keep up to 10 short notes (300 characters each) per website, for e
 
 ## Small-context helpers
 
+- **Repeats:** when the model opens an address, runs a web search, lists a folder or reads a file it already did in this conversation, the result says so ("you already opened this address once…"). Small models otherwise go in circles on made-up addresses.
+- **Clicks that do nothing:** the second time the same click or key press changes nothing on the page, the result tells the model to stop repeating it and try another way.
+- **Progress note at the step limit:** when a task reaches the step limit, LocalPilot asks the model once more, without tools, for a short note: what it found (with URLs), what failed, and what to do next. The note is shown in the panel and stays in the chat, so "continue" picks up from it instead of starting over.
+
 - **Streaming:** with OpenAI-style servers, replies stream (`stream: true`, SSE) and the text appears in the panel as it is generated. If a server rejects streaming, LocalPilot asks again without it and remembers that for the task. Setting: "Stream replies as they are generated".
 - **Summaries of old turns:** when a request's prompt grows past "Summarize older turns when the prompt exceeds" (default 24 000 tokens, counted from the server's `usage`, or estimated), the older messages are replaced by a model-written summary that keeps URLs, file paths, names and numbers. The last few messages stay verbatim, and the panel notes "Summarized N older messages". Set it to 0 to turn this off.
 
@@ -364,6 +379,7 @@ The agent can keep up to 10 short notes (300 characters each) per website, for e
 | `find` | Finds elements by role, label or text, in all frames and shadow roots, and returns refs |
 | `form_input` | Sets inputs, textareas, selects, checkboxes and custom elements (web components) by ref; works with React and Vue fields |
 | `get_page_text` | Plain text of the main content |
+| `web_search` | Searches the web and returns a list of results: title, link and snippet (see **Web search**) |
 | `handle_dialog` | Answers a `confirm()` / `prompt()` / "Leave page?" dialog (see Safety) |
 | `tabs_context`, `tabs_create`, `switch_tab`, `tabs_close` | Lists (this or all windows), opens, switches and closes tabs |
 | `file_upload` | Attaches files to a file input: a file the user attached in the panel (`attachment`, no PC bridge needed), or a file from a PC root (`root` + `path`, e.g. `China/cv.pdf`, needs the PC bridge). Separate "upload … files to <site>" approval |
@@ -371,6 +387,7 @@ The agent can keep up to 10 short notes (300 characters each) per website, for e
 | `read_console_messages`, `read_network_requests` | Shows console output and network requests captured over CDP; kept when the debugger detaches |
 | `resize_window` | Resizes the window |
 | `javascript_tool` | Runs JS in the page. **Off by default**; turn it on in Settings. |
+| `pc_search` | Finds files on the PC by name or by text inside (needs the PC bridge) |
 | `extract_list` | Detects repeating lists on any page and returns or saves them as rows, with paging (see above) |
 | `site_note` | Per-site memory: add, list or remove short notes for the current site |
 | `test_website` | Testing mode: read-only crawl, bug checks, phone check, link check; HTML report + GIF (see above) |
@@ -379,6 +396,17 @@ The agent can keep up to 10 short notes (300 characters each) per website, for e
 | Quantara | `quantara_status`, `quantara_trades`, `quantara_analysis`, `quantara_research`, and `quantara_halt` with a token (only when turned on in Settings; see **Trading: Quantara**) |
 
 **Page settling.** After clicks and key presses, tools wait until the page has had no DOM changes for 300 ms and no requests are in flight, capped at 5 s. On single-page apps, results are therefore there before the next step.
+
+**What changed.** After a click, key press, typing, hover, drag or `form_input`, the tool reply also says what happened, so the model does not need a `read_page` after every action:
+- **On the same page:** the new URL or title if they changed, the elements that appeared (up to 25) and the ones that went away (up to 10), with their refs. Or **"No visible change on the page."**
+- **On a new page:** its title, URL and the controls visible on screen.
+- **In a new tab:** that a new tab opened, with its id, so the model can `switch_tab`.
+
+**Forgiving tools.**
+- `form_input` on a dropdown accepts an option when exactly one fits: the same text in any case, an option that starts with the value ("Mobile" → "Mobile Phone", "Pakistan" → "Pakistani"), the value starting with an option, or an option containing it. It says which option it chose. When several fit, it lists them instead of guessing.
+- Names other agents use are mapped to LocalPilot's tools: `search` / `google` → `web_search`; `goto` / `open_url` → `navigate`; computer actions `find`, `click`, `press`, `down` / `up` / `scroll_down` → `find`, `left_click`, `key`, `scroll`.
+- `navigate` reports the page's HTTP status when it is an error ("HTTP 404 (not found): this address does not exist"), or that the page did not load, and tells the model not to guess addresses.
+- If Chrome drops the debugger connection in the middle of a command, LocalPilot reconnects. Reading actions (screenshot, scroll, wait, `read_page`…) are retried once. A click, typing or a key press is not repeated, since it may already have happened; the model is told to check the page first.
 
 ## Safety
 
@@ -442,6 +470,7 @@ npm run test:e2e:phase-d     # mock Quantara (status, analysis, halt asks every 
 npm run test:e2e:phase-e     # testing mode on a buggy mock shop (every check, logout never opened, report + GIF), gif_recorder, record every run, /test and /record
 npm run test:e2e:dialogs     # a dialog open before attach: reported at once, freed by handle_dialog; new tabs attached at once
 npm run test:e2e:antidebug   # a page that reloads or blanks itself under console capture: learned, stops, forgotten again
+npm run test:e2e:quickwins   # change reports, forgiving dropdowns, aliases, HTTP status, web_search, reconnect, pc_search, repeat notes, progress note
 npm run demo                 # regenerate examples/demo: the buggy demo shop (offline, no model)
 npm run demo:ai              # regenerate examples/demo-ai: LocalPilot's agent with your model on real sites (model from src/local-defaults.json or LP_BASE_URL / LP_MODEL / LP_API_KEY)
 npm run test:all       # everything

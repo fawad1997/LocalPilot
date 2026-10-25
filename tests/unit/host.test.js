@@ -143,3 +143,20 @@ test('stdio framing end to end', async () => {
   assert.equal(replies[2].ok, false);
   assert.match(replies[2].error, /escapes root/);
 });
+
+test('search finds files by name pattern and by text, inside the root only', () => {
+  fs.mkdirSync(path.join(dir, 'jobs', 'Europe', 'Acme'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'jobs', 'Europe', 'Acme', 'CV_Fawad.pdf'), 'pdf');
+  fs.writeFileSync(path.join(dir, 'jobs', 'Europe', 'log.md'), 'one\nApplied to Acme\nthree');
+  fs.mkdirSync(path.join(dir, 'jobs', 'node_modules'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'jobs', 'node_modules', 'cv.md'), 'Applied to Acme');
+  const byName = h.search({ root: 'jobs', name: 'cv_*.pdf' });
+  assert.deepEqual(byName.results.map((r) => r.path), [path.join('Europe', 'Acme', 'CV_Fawad.pdf')]);
+  const byText = h.search({ root: 'jobs', text: 'applied to acme' });
+  assert.deepEqual(byText.results.map((r) => [r.path, r.line, r.snippet]), [[path.join('Europe', 'log.md'), 2, 'Applied to Acme']]);
+  const dirs = h.search({ root: 'jobs', name: 'acme' });
+  assert.deepEqual(dirs.results.map((r) => [r.path, r.type]), [[path.join('Europe', 'Acme'), 'dir']]);
+  assert.throws(() => h.search({ root: 'jobs' }), /Give name/);
+  assert.throws(() => h.search({ root: 'jobs', path: '../outside', name: 'secret' }), /escapes root/);
+  assert.equal(h.search({ root: 'jobs', name: 'e', limit: 2 }).results.length, 2);
+});

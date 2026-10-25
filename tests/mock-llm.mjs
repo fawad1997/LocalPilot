@@ -265,6 +265,45 @@ const APPLY_PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Appl
 <script>document.getElementById('cv').addEventListener('change', (e) => { document.getElementById('file').textContent = e.target.files[0].name + ' ' + e.target.files[0].size; });</script>
 </main></body></html>`;
 
+// 0.8.0 quick wins: change reports, forgiving selects, search result pages in three engines' markup.
+const QW_FORM = `<!doctype html><html><head><meta charset="utf-8"><title>Quick wins</title></head><body><main>
+<h1>Contact form</h1>
+<label>Phone type <select id="ptype"><option value="">Choose…</option><option value="primary">Primary Phone</option><option value="mobile">Mobile Phone</option></select></label>
+<label>Nationality <select id="nat"><option value="">------</option><option>Pakistani</option><option>Palauan</option><option>Other</option></select></label>
+<label>Region <select id="region"><option>Select Region</option><option>Guangdong Sheng</option><option>Guangxi Zhuangzu Zizhiqu</option></select></label>
+<label>Contact by <select id="contact"><option>Work Email</option><option>Work Phone</option></select></label>
+<label>Search <input id="q" oninput="sug()"></label><ul id="sug"></ul>
+<button id="open" onclick="document.getElementById('dlg').showModal()">Open dialog</button>
+<dialog id="dlg"><p>Are you sure?</p><button onclick="this.closest('dialog').close()">Close</button></dialog>
+<button id="noop">Does nothing</button>
+<a href="/qw/next">Next page</a> <a href="/qw/next?popped" target="_blank">Pop out</a>
+<script>function sug() { const v = document.getElementById('q').value; document.getElementById('sug').innerHTML = v ? '<li><a href="/qw/next">' + v + ' suggestion</a></li>' : ''; }</script>
+</main></body></html>`;
+
+const QW_NEXT = '<!doctype html><html><head><title>Next</title></head><body><h1>Next page</h1><a href="/qw/form">Back to form</a></body></html>';
+
+const b64url = (s) => Buffer.from(s).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+function qwSearch(kind, q) {
+  const esc = (t) => t.replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' })[c]);
+  const head = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(q)} - search</title></head><body>`;
+  if (kind === 'ddg') {
+    return `${head}<div class="result result--ad"><a class="result__a" href="https://ads.example/x">Sponsored thing</a></div>
+<div class="result"><a class="result__a" href="//duckduckgo.com/l/?uddg=${encodeURIComponent('https://example.org/muhammad-aleem')}&rut=abc">Dr. Muhammad Aleem - FAST</a><a class="result__snippet">Associate Professor, email m.aleem@example.org, Islamabad campus.</a></div>
+<div class="result"><a class="result__a" href="//duckduckgo.com/l/?uddg=${encodeURIComponent('https://example.org/faculty')}">Faculty list</a><a class="result__snippet">All faculty of the computing department.</a></div>
+<a href="/qw/search?q=next">Next page</a></body></html>`;
+  }
+  if (kind === 'bing') {
+    return `${head}<ol id="b_results"><li class="b_algo"><h2><a href="https://www.bing.com/ck/a?!&&p=abc&u=a1${b64url('https://example.net/bing-one')}&ntb=1">Bing result one</a></h2><div class="b_caption"><p>Snippet for the first Bing result.</p></div></li>
+<li class="b_algo"><h2><a href="https://example.net/bing-two">Bing result two</a></h2><div class="b_caption"><p>Second snippet.</p></div></li></ol></body></html>`;
+  }
+  if (kind === 'google') {
+    return `${head}<div id="search"><div class="g"><a href="/url?q=https://example.com/google-one&sa=U"><h3>Google result one</h3></a><div>This is the snippet text of the first Google result, long enough to keep.</div></div>
+<div class="g"><a href="https://example.com/google-two"><h3>Google result two</h3></a><div>Another snippet text that is also long enough to be kept as the snippet.</div></div>
+<div class="g"><a href="/goto?url=CAESabc123"><h3>Google result three</h3><cite>2.4K+ followers</cite><cite>https://example.edu › people</cite></a><div>A result whose link is Google's own redirect, as google.com.hk serves them.</div></div></div></body></html>`;
+  }
+  return `${head}<p>Our systems have detected unusual traffic from your computer network.</p></body></html>`;
+}
+
 function firstUserText(messages) {
   const first = messages.find((m) => m.role === 'user');
   return typeof first?.content === 'string' ? first.content : (first?.content || []).map((p) => p.text || '').join(' ');
@@ -278,7 +317,7 @@ function scriptedFlow(messages, base, steps) {
   const last = tools.at(-1)?.content || '';
   const next = steps[step];
   if (!next) return { role: 'assistant', content: `FINAL: ${tools.map((t) => t.content).join(' || ')}` };
-  const [name, args] = next(last, base);
+  const [name, args] = next(last, tools.map((t) => t.content).join('\n'));
   return { role: 'assistant', content: null, tool_calls: [{ id: `call_${step}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }] };
 }
 
@@ -313,12 +352,23 @@ const FLOWS = {
   'QUANTARA-FLOW': [() => ['quantara_status', {}]],
   'HALT-FLOW': [() => ['quantara_halt', { reason: 'test halt' }]],
   'NOTE-FLOW': [() => ['site_note', { action: 'add', text: 'Search URL is /list?page=N' }]],
+  // 0.8.0: a repeated made-up address, a button that does nothing clicked twice, then the step limit.
+  'LOOP-FLOW': [
+    () => ['navigate', { url: 'BASE/qw/missing' }],
+    () => ['navigate', { url: 'BASE/qw/missing/' }],
+    () => ['navigate', { url: 'BASE/qw/form' }],
+    () => ['find', { query: 'Does nothing' }],
+    (last) => ['computer', { action: 'left_click', ref: last.match(/\[(ref_\d+)\]/)?.[1] || 'ref_missing' }],
+    (last, all) => ['click', { ref: all.match(/button "Does nothing" \[(ref_\d+)\]/)?.[1] || 'ref_missing' }],
+    () => ['get_page_text', {}],
+  ],
 };
 
 // Requests without tools: plan-first planning and context summaries.
 function noToolsReply(parsed) {
   if (parsed.tools?.length) return null;
   const system = parsed.messages.find((m) => m.role === 'system')?.content || '';
+  if (/STEP LIMIT REACHED/.test(system)) return { role: 'assistant', content: 'PROGRESS: /qw/missing is a 404; the form is at /qw/form. Next: fill in the form.' };
   if (/PLANNING STEP/.test(system)) return { role: 'assistant', content: '1. Open the test page\n2. Read its text\n3. Report what it says' };
   if (/compress the history/.test(system)) {
     const text = parsed.messages.map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n');
@@ -334,8 +384,8 @@ function nextReply(messages, base) {
   if (isBossFlow(messages)) return bossReply(messages);
   const flow = Object.keys(FLOWS).find((k) => firstUserText(messages).includes(k));
   if (flow) {
-    const steps = FLOWS[flow].map((fn) => (last) => {
-      const [name, args] = fn(last);
+    const steps = FLOWS[flow].map((fn) => (last, all) => {
+      const [name, args] = fn(last, all);
       return [name, JSON.parse(JSON.stringify(args).replace(/BASE/g, base))];
     });
     return scriptedFlow(messages, base, steps.map((st, i) => (FLOWS[flow][i] ? st : null)));
@@ -522,6 +572,23 @@ customElements.define('my-input', class extends HTMLElement {
     }
     if (url.pathname === '/apply') {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(APPLY_PAGE);
+      return;
+    }
+    if (url.pathname === '/qw/form') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(QW_FORM);
+      return;
+    }
+    if (url.pathname === '/qw/next') {
+      res.writeHead(200, { 'content-type': 'text/html' }).end(QW_NEXT);
+      return;
+    }
+    const qwKind = { '/qw/search': 'ddg', '/qw/search-bing': 'bing', '/qw/search-google': 'google', '/qw/search-blocked': 'blocked' }[url.pathname];
+    if (qwKind) {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(qwSearch(qwKind, url.searchParams.get('q') || ''));
+      return;
+    }
+    if (url.pathname.startsWith('/qw/')) {
+      res.writeHead(404, { 'content-type': 'text/html' }).end('<!doctype html><title>Not found</title><h1>404</h1>');
       return;
     }
     if (url.pathname === '/captcha') {

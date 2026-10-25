@@ -9,6 +9,7 @@ import { startRecording, stopRecording, addFrame, buildGif, saveDownload, copyTo
 import { TEST_WEBSITE_DEF, testWebsite } from './sitetest.js';
 import { checkSubmitGuard } from './recipes/apply.js';
 import { handleBotCheck, captchaAtPoint } from './botcheck.js';
+import { WEB_SEARCH_DEF, SEARCH_APPROVAL, webSearch } from './websearch.js';
 import { log } from './logger.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -29,6 +30,7 @@ const coordinate = {
 export function toolDefinitions(settings, host = null, attachments = []) {
   return [
     ...browserToolDefinitions(settings),
+    WEB_SEARCH_DEF,
     DOWNLOADS_WAIT_DEF,
     ...captureToolDefinitions,
     ...pcToolDefinitions(host),
@@ -621,7 +623,7 @@ const READ_ONLY_COMPUTER = new Set(['screenshot', 'wait', 'zoom']);
 
 const NO_APPROVAL = new Set([
   'read_page', 'find', 'get_page_text', 'tabs_context', 'switch_tab', 'read_console_messages',
-  'read_network_requests', 'resize_window', 'capture_start', 'capture_read', 'pc_list_dir', 'pc_read_file',
+  'read_network_requests', 'resize_window', 'capture_start', 'capture_read', 'pc_list_dir', 'pc_read_file', 'pc_search',
   ...QUANTARA_READ_TOOLS, 'site_note',
 ]);
 
@@ -630,7 +632,7 @@ const ALWAYS_ASK = new Set(ALWAYS_ASK_TOOLS);
 const ALWAYS_ASK_TARGET = { quantara_halt: 'Quantara: emergency stop (no new trades)' };
 
 // Tools that never touch a tab (no debugger attach, no dialog or bot-check handling).
-const TABLESS = new Set([...QUANTARA_TOOLS, 'site_note']);
+const TABLESS = new Set([...QUANTARA_TOOLS, 'site_note', 'web_search']);
 
 // extract_list only reads, unless it pages (scrolls or clicks "Next") or saves to the PC.
 const extractPages = (input) => (input.action === 'extract' ? Math.min(Math.max(Math.round(Number(input.pages) || 1), 1), 20) : 1);
@@ -651,6 +653,7 @@ async function approvalTarget(ctx, name, input) {
   if (name === 'gif_recorder') return `PC folder: ${input.save_to?.root}`;
   if (name === 'test_website' && input.url) return hostOf(normalizeUrl(input.url));
   if (name === 'downloads_wait') return `PC folder: ${input.save_to?.root}`;
+  if (name === 'web_search') return SEARCH_APPROVAL;
   if (name === 'file_upload') {
     // Sending a local file to a website is approved separately from acting on it.
     const host = hostOf((await tabInfo(ctx.tabId)).url);
@@ -716,7 +719,7 @@ const BOT_CHECK_AFTER = new Set(['navigate', 'read_page', 'get_page_text', 'find
 const BOT_CHECK_ACTIONS = new Set(['left_click', 'right_click', 'double_click', 'triple_click', 'key', 'type']);
 
 // Tools that still work while a confirm/prompt dialog blocks the page.
-const DIALOG_SAFE = new Set(['handle_dialog', 'downloads_wait', 'tabs_context', 'tabs_create', 'switch_tab', 'read_console_messages', 'read_network_requests', 'capture_read', 'capture_save', 'pc_list_dir', 'pc_read_file', 'pc_write_file', 'pc_write_csv', 'pc_run_script']);
+const DIALOG_SAFE = new Set(['handle_dialog', 'downloads_wait', 'tabs_context', 'tabs_create', 'switch_tab', 'read_console_messages', 'read_network_requests', 'capture_read', 'capture_save', 'pc_list_dir', 'pc_read_file', 'pc_search', 'pc_write_file', 'pc_write_csv', 'pc_run_script']);
 
 function pendingDialogText(d) {
   if (d.preAttach) {
@@ -728,19 +731,95 @@ function pendingDialogText(d) {
 
 const COMPUTER_ACTIONS = new Set(['screenshot', 'left_click', 'right_click', 'double_click', 'triple_click', 'hover', 'left_click_drag', 'type', 'key', 'scroll', 'scroll_to', 'wait', 'wait_for', 'zoom']);
 
-// Small local models sometimes leak chat-format tokens into the tool name ("wait<|channel|>commentary")
-// or call a computer action as if it were a tool ("wait_for", "scroll"). Map those to the real call.
+// Names models use for tools that exist under another name.
+const TOOL_ALIASES = {
+  search: 'web_search', websearch: 'web_search', google: 'web_search', google_search: 'web_search', search_web: 'web_search',
+  goto: 'navigate', go_to: 'navigate', open_url: 'navigate', visit: 'navigate', open: 'navigate',
+  get_text: 'get_page_text', read_text: 'get_page_text', page_text: 'get_page_text',
+};
+// Computer actions models invent, mapped to a real action (or to another tool).
+const ACTION_ALIASES = {
+  click: { action: 'left_click' }, press: { action: 'key' }, keypress: { action: 'key' }, key_press: { action: 'key' },
+  type_text: { action: 'type' }, input: { action: 'type' }, mouse_move: { action: 'hover' }, move: { action: 'hover' },
+  down: { action: 'scroll', scroll_direction: 'down' }, scroll_down: { action: 'scroll', scroll_direction: 'down' }, page_down: { action: 'scroll', scroll_direction: 'down' },
+  up: { action: 'scroll', scroll_direction: 'up' }, scroll_up: { action: 'scroll', scroll_direction: 'up' }, page_up: { action: 'scroll', scroll_direction: 'up' },
+};
+
+// Small local models sometimes leak chat-format tokens into the tool name ("wait<|channel|>commentary"),
+// call a computer action as if it were a tool ("wait_for", "scroll"), or use another agent's names
+// ("search", computer action "find"). Map those to the real call.
 export function normalizeToolCall(name, input = {}) {
   let n = String(name || '').replace(/<\|.*$/s, '').trim();
   let args = input && typeof input === 'object' ? input : {};
-  if (COMPUTER_ACTIONS.has(n)) {
+  n = TOOL_ALIASES[n.toLowerCase()] || n;
+  if (ACTION_ALIASES[n]) {
+    args = { ...args, ...ACTION_ALIASES[n] };
+    n = 'computer';
+  } else if (COMPUTER_ACTIONS.has(n)) {
     args = { ...args, action: n };
     n = 'computer';
-  } else if (n === 'click') {
-    args = { ...args, action: 'left_click' };
-    n = 'computer';
   }
+  if (n === 'computer' && ACTION_ALIASES[args.action]) args = { ...args, ...ACTION_ALIASES[args.action] };
+  if (n === 'computer' && args.action === 'find') return { name: 'find', input: { query: args.query ?? args.text ?? '' } };
+  if (n === 'computer' && ['navigate', 'goto'].includes(args.action)) return { name: 'navigate', input: { url: args.url ?? args.text } };
+  if (n === 'web_search' && args.query === undefined) args = { ...args, query: args.q ?? args.text ?? args.search ?? args.keywords };
   return { name: n, input: args };
+}
+
+// Actions after which the tool reply also says what changed on the page.
+const CHANGE_REPORT_ACTIONS = new Set(['left_click', 'right_click', 'double_click', 'triple_click', 'key', 'type', 'hover', 'left_click_drag']);
+// Of those, the ones that do not wait for the page themselves.
+const NO_SETTLE_ACTIONS = new Set(['type', 'hover', 'left_click_drag']);
+
+function reportsChanges(name, input) {
+  return name === 'form_input' || (name === 'computer' && CHANGE_REPORT_ACTIONS.has(input.action));
+}
+
+function withTimeout(promise, ms) {
+  return Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve(null), ms))]);
+}
+
+const clip = (line, max = 140) => (line.length > max ? `${line.slice(0, max - 1)}…` : line);
+
+export function formatChanges(ch) {
+  if (!ch) return '';
+  if (ch.newPage) return `\nNow on a new page: "${ch.title}" ${ch.url}${ch.outline.trim() ? `\nVisible controls:\n${ch.outline}` : ''}`;
+  const parts = [];
+  if (ch.urlChanged) parts.push(`URL is now ${ch.url}`);
+  if (ch.titleChanged) parts.push(`Title is now "${ch.title}"`);
+  if (ch.addedTotal) parts.push(`Appeared (${ch.addedTotal}):\n${ch.added.map((l) => clip(l)).join('\n')}${ch.addedTotal > ch.added.length ? `\n… and ${ch.addedTotal - ch.added.length} more (read_page shows all)` : ''}`);
+  if (ch.removedTotal) parts.push(`Gone (${ch.removedTotal}):\n${ch.removed.map((l) => clip(l)).join('\n')}${ch.removedTotal > ch.removed.length ? `\n… and ${ch.removedTotal - ch.removed.length} more` : ''}`);
+  return parts.length ? `\nPage changes:\n${parts.join('\n')}` : '\nNo visible change on the page.';
+}
+
+async function newTabsNote(tabId, before) {
+  if (!before) return '';
+  const tabs = await chrome.tabs.query({}).catch(() => []);
+  const opened = tabs.filter((t) => !before.has(t.id) && t.openerTabId === tabId);
+  return opened.map((t) => `\nA new tab opened: ${t.id} "${t.title || ''}" ${t.pendingUrl || t.url}. Use switch_tab to work in it.`).join('');
+}
+
+// The debugger connection can drop in the middle of a command ("Detached while handling command").
+const DETACHED = /Detached while handling command|Debugger is not attached|not attached to the tab/i;
+// Safe to run again after reconnecting: they read, wait or move the view, nothing else.
+function retrySafe(name, input) {
+  if (NO_APPROVAL.has(name) || name === 'navigate') return true;
+  return name === 'computer' && ['screenshot', 'zoom', 'wait', 'wait_for', 'scroll', 'scroll_to', 'hover'].includes(input.action);
+}
+
+async function runAndReconnect(ctx, name, input) {
+  try {
+    return await runToolInner(ctx, name, input);
+  } catch (err) {
+    if (!DETACHED.test(String(err.message))) throw err;
+    log('cdp_reconnect', { runId: ctx.runId, tabId: ctx.tabId, tool: name, action: input.action, error: err.message });
+    await cdp.detach(ctx.tabId);
+    await cdp.attach(ctx.tabId);
+    if (!retrySafe(name, input)) {
+      throw new Error('The browser connection to the tab dropped during this action and has been restored. Check the page (read_page or a screenshot) before repeating it.');
+    }
+    return runToolInner(ctx, name, input);
+  }
 }
 
 export async function runTool(ctx, rawName, rawInput = {}) {
@@ -757,7 +836,17 @@ export async function runTool(ctx, rawName, rawInput = {}) {
   ctx.lastPoint = null;
   ctx.lastLabel = null;
   cdp.markAgentAction(ctx.tabId);
-  const blocks = await runToolInner(ctx, name, input);
+  const watch = reportsChanges(name, input);
+  const before = watch ? await withTimeout(callPage(ctx.tabId, 'snapshot').catch(() => null), 3000) : null;
+  const tabsBefore = watch ? new Set((await chrome.tabs.query({}).catch(() => [])).map((t) => t.id)) : null;
+  const blocks = await runAndReconnect(ctx, name, input);
+  if (before && !cdp.getState(ctx.tabId)?.pendingDialog) {
+    if (name === 'form_input' || NO_SETTLE_ACTIONS.has(input.action)) await settle(ctx.tabId, 1500);
+    const ch = cdp.getState(ctx.tabId)?.pendingDialog ? null : await withTimeout(callPage(ctx.tabId, 'changes').catch(() => null), 3000);
+    const note = formatChanges(ch) + (await newTabsNote(ctx.tabId, tabsBefore));
+    const firstText = blocks.find((b) => b.type === 'text');
+    if (note && firstText) firstText.text += note;
+  }
   if (ctx.recording && recordsAfter(name, input)) await recordFrame(ctx, describeAction(name, input, ctx.lastLabel));
   const blocked = cdp.getState(ctx.tabId)?.pendingDialog; // page scripts would hang now
   if (!blocked && (BOT_CHECK_AFTER.has(name) || (name === 'computer' && BOT_CHECK_ACTIONS.has(input.action)))) {
@@ -889,6 +978,8 @@ async function runToolInner(ctx, name, input) {
     }
     case 'downloads_wait':
       return downloadsWait(ctx, input);
+    case 'web_search':
+      return webSearch(ctx, input);
     default: {
       const recipe = getRecipe(name);
       if (recipe) return recipe.run(ctx, input);
@@ -1061,12 +1152,26 @@ async function navigate(ctx, { url }) {
   } else {
     await chrome.tabs.update(tabId, { url: normalizeUrl(url) });
   }
+  const started = Date.now() - 50;
   await sleep(150);
   await waitForLoad(tabId);
   await settle(tabId, 3000); // single-page apps keep rendering after "load"
   const tab = await tabInfo(tabId);
   if (ctx.running) await setIndicator(tabId, true);
-  return [text(`Navigated. Title: ${tab.title}\nURL: ${tab.url}${await dialogNote(tabId)}`)];
+  return [text(`Navigated. Title: ${tab.title}\nURL: ${tab.url}${loadProblem(tabId, started)}${await dialogNote(tabId)}`)];
+}
+
+// The page's own HTTP status (last main document since the navigation started): a guessed URL
+// that does not exist should say so plainly.
+function loadProblem(tabId, since) {
+  const docs = [...(cdp.getState(tabId)?.network.values() || [])].filter((r) => r.type === 'Document' && r.ts >= since);
+  const last = docs.at(-1);
+  if (!last) return '';
+  if (last.error && !last.status) return `\nThe page did not load (${last.error}). Check the address, or use web_search to find the right one.`;
+  if (last.status >= 400) {
+    return `\nThe server answered HTTP ${last.status}${last.status === 404 ? ' (not found): this address does not exist' : ''}. Do not guess addresses: follow a link on the site (find / read_page) or use web_search.`;
+  }
+  return '';
 }
 
 async function computer(ctx, input) {

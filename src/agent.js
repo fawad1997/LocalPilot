@@ -1,7 +1,7 @@
 // Agent loop: model <-> browser tools, provider-agnostic.
 import { createProvider, ProviderError, retryDelayMs } from './providers.js';
 import { log } from './logger.js';
-import { toolDefinitions, runTool, setIndicator, recordFrame, exportRecording } from './tools.js';
+import { toolDefinitions, runTool, setIndicator, recordFrame, exportRecording, normalizeToolCall } from './tools.js';
 import { startRecording } from './recorder.js';
 import * as cdp from './cdp.js';
 import * as pcbridge from './pcbridge.js';
@@ -10,6 +10,7 @@ import { quantaraPromptLines } from './quantara.js';
 import { siteKey, notesFor, notesPrompt } from './sitenotes.js';
 
 const KEEP_IMAGES = 2; // older screenshots are dropped from history to save context
+const NOOP_LIMIT = 2; // the same click/key changing nothing this many times gets a nudge
 const KEEP_RECENT = 6; // messages kept verbatim when older turns are summarized
 
 const PLAN_INSTRUCTIONS = [
@@ -17,6 +18,14 @@ const PLAN_INSTRUCTIONS = [
   'PLANNING STEP: do not call any tools now. Reply only with a short numbered plan (at most 8 steps) of how you will do the task:',
   'which pages you will open, what you will read, fill or click, which files you will write. Mention steps that change something (submit, send, buy, delete).',
   'The user approves or edits the plan before you act.',
+].join('\n');
+
+const PROGRESS_INSTRUCTIONS = [
+  '',
+  'STEP LIMIT REACHED: do not call any tools now. Write a short progress note (at most 150 words) so the work can continue later without repeating anything:',
+  '- Found so far: facts and values, with the URLs or files they came from.',
+  '- Tried without success: pages, searches and approaches not worth repeating.',
+  '- Next: the next 2-3 steps when the user says "continue".',
 ].join('\n');
 
 const SUMMARY_SYSTEM = [
@@ -52,6 +61,7 @@ function pcSection(host) {
   return [
     'PC bridge: connected. You can read and write files and run allowlisted scripts on the user\'s PC with the pc_* tools.',
     `Roots: ${host.roots.map((r) => `${r.name} = ${r.path}`).join('; ')}`,
+    '- To find a file, use pc_search (by name or by text inside) instead of listing folder after folder.',
     '- To save structured data from a website, prefer capture_start (before loading the page) and then capture_save. That writes the site\'s own API data straight to a file without you copying it.',
     'Recipes (fixed, reliable flows; prefer them over doing the same by hand). Job-board recipes save a CSV and an import draft in the jobs folder, skip jobs collected before, and run the import:',
     ...recipePromptLines(host),
@@ -75,7 +85,8 @@ function systemPrompt(settings, tab, host, notes = null) {
     '- Use get_page_text to read articles, search results and long content.',
     '- To collect a list from any site (search results, cards, table rows), use extract_list (detect, then extract; save writes a CSV) instead of copying items by hand.',
     '- To test a website for bugs, use test_website (it crawls read-only, records a GIF and writes a report), then explain the findings. To record what you do as a GIF, use gif_recorder (start, then export).',
-    '- One step at a time: act, then check what happened before the next action.',
+    '- One step at a time: act, then check what happened before the next action. After clicks, key presses, typing and form_input the tool reply already lists what changed on the page (or says "No visible change"); use that instead of calling read_page again, unless you need more detail.',
+    '- To find something on the web, use web_search (not search-engine pages), then open a result with navigate. Do not guess addresses: when a page answers 404, follow a link on the site or search instead.',
     '- When the task is done, reply with a short final answer in plain text and stop calling tools.',
     '- If you are blocked (login, CAPTCHA, missing information, a decision only the user can make), stop and ask the user.',
     '',
@@ -110,6 +121,58 @@ function pruneImages(messages) {
       }
     }
   }
+}
+
+// Small models loop: they reopen the same made-up address, repeat a search, re-read a folder.
+// A call that repeats an earlier one in this conversation gets a note saying so.
+export function repeatKey(rawName, rawInput) {
+  const { name, input } = normalizeToolCall(rawName, rawInput);
+  const norm = (v) => String(v ?? '').trim().replace(/#.*$/, '').replace(/\/+$/, '').toLowerCase();
+  switch (name) {
+    case 'navigate':
+      return ['back', 'forward'].includes(input.url) ? null : `navigate ${norm(input.url).replace(/^https?:\/\//, '').replace(/^www\./, '')}`;
+    case 'web_search':
+      return `web_search ${norm(input.query).replace(/\s+/g, ' ')}`;
+    case 'pc_list_dir':
+    case 'pc_read_file':
+      return `${name} ${input.root}:${norm(input.path || '.')}`;
+    case 'pc_search':
+      return `pc_search ${input.root}:${norm(input.path || '.')} ${norm(input.name)} ${norm(input.text)}`;
+    default:
+      return null;
+  }
+}
+
+const REPEAT_WHAT = { navigate: 'opened this address', web_search: 'searched for this', pc_list_dir: 'listed this folder', pc_read_file: 'read this file', pc_search: 'ran this search' };
+
+export function repeatNote(messages, use) {
+  const key = repeatKey(use.name, use.input);
+  if (!key) return '';
+  let n = 0;
+  for (const m of messages) {
+    if (m.role !== 'assistant' || !Array.isArray(m.content)) continue;
+    for (const b of m.content) if (b.type === 'tool_use' && b.id !== use.id && repeatKey(b.name, b.input) === key) n += 1;
+  }
+  if (!n) return '';
+  const what = REPEAT_WHAT[normalizeToolCall(use.name, use.input).name];
+  return `\nNote: you already ${what} ${n === 1 ? 'once' : `${n} times`} in this conversation. If that did not get you what you need, try a different approach instead of repeating it.`;
+}
+
+// Clicks and key presses whose change report says nothing changed, counted per target.
+export function noopNote(noops, rawName, rawInput, resultText) {
+  const { name, input } = normalizeToolCall(rawName, rawInput);
+  if (name !== 'computer' || !/\nNo visible change on the page\./.test(resultText)) return '';
+  const key = `${input.action} ${input.ref ?? input.mark ?? JSON.stringify(input.coordinate ?? input.text ?? '')}`;
+  const n = (noops.get(key) || 0) + 1;
+  noops.set(key, n);
+  return n >= NOOP_LIMIT ? `\nThis ${input.action.replace('_', ' ')} has now changed nothing ${n} times. Do not repeat it: try another element, scroll to find the right one, or another way.` : '';
+}
+
+function appendText(content, note) {
+  if (!note) return;
+  const first = content.find((b) => b.type === 'text');
+  if (first) first.text += note;
+  else content.unshift({ type: 'text', text: note.trim() });
 }
 
 export class Conversation {
@@ -286,6 +349,7 @@ export class AgentRun {
           return;
         }
       }
+      const noops = new Map();
       for (let step = 0; step < settings.maxSteps; step += 1) {
         if (this.stopped) break;
         steps = step + 1;
@@ -331,6 +395,7 @@ export class AgentRun {
             this.useTab(this.ctx.tabId);
             const content = await runTool(this.ctx, use.name, use.input);
             this.useTab(this.ctx.tabId); // tool may have switched tabs
+            appendText(content, repeatNote(messages, use) + noopNote(noops, use.name, use.input, content.find((b) => b.type === 'text')?.text || ''));
             results.push({ type: 'tool_result', toolUseId: use.id, isError: false, content });
             this.emit({ type: 'tool_result', id: use.id, name: use.name, ok: true, content: summarize(content) });
             log('tool_call', { runId: this.runId, step, name: use.name, input: use.input, ok: true, ms: Date.now() - toolStarted, result: content.map((b) => (b.type === 'text' ? b.text.slice(0, 300) : b)) });
@@ -348,6 +413,7 @@ export class AgentRun {
         this.emit({ type: 'done', reason: 'stopped' });
       } else {
         endReason = 'max_steps';
+        await this.progressNote();
         this.emit({ type: 'done', reason: 'max_steps', text: `Stopped after ${settings.maxSteps} steps. Send a message to continue.` });
       }
     } catch (err) {
@@ -374,6 +440,24 @@ export class AgentRun {
   }
 
   // Plan-first mode: the model writes a plan without tools; the user approves or edits it.
+  // At the step limit: one more request, without tools, for a note of what was found, what
+  // failed and what is next. It stays in the history, so "continue" picks up from it.
+  async progressNote() {
+    const { messages } = this.conversation;
+    const { settings } = this.ctx;
+    try {
+      this.emit({ type: 'status', text: 'Writing a progress note…' });
+      const tab = await chrome.tabs.get(this.ctx.tabId).catch(() => null);
+      const response = await this.complete({ system: systemPrompt(settings, tab, this.ctx.host, await siteNotesFor(tab)) + PROGRESS_INSTRUCTIONS, messages, tools: [] }, 'progress');
+      const note = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+      if (!note) return;
+      messages.push({ role: 'assistant', content: [{ type: 'text', text: `Progress note (step limit reached):\n${note}` }] });
+      this.emit({ type: 'assistant', text: `Progress note:\n${note}` });
+    } catch (err) {
+      log('progress_note_failed', { runId: this.runId, error: String(err.message || err) });
+    }
+  }
+
   async planFirst() {
     const { messages } = this.conversation;
     const { settings } = this.ctx;

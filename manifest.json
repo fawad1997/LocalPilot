@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "LocalPilot",
-  "version": "0.7.3",
+  "version": "0.8.0",
   "description": "Browser agent in a side panel, powered by your local LLM API (Ollama, LM Studio, llama.cpp, vLLM, LiteLLM).",
   "minimum_chrome_version": "116",
   "action": {

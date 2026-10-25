@@ -124,6 +124,7 @@ To remove the PC bridge later, run `node host/install.mjs --uninstall`.
 | Example | What happens |
 | --- | --- |
 | "Collect 30 Python jobs on Liepin in Shenzhen" | Gathers job listings into a spreadsheet (needs step 4). Works on BOSS, 51job, Zhaopin and LinkedIn too |
+| "Find the email address of Dr. X, who teaches computer science at Y University" | Searches the web, opens the likely pages and reports what it found, with links |
 | "Save every result on this page and the next 2 pages as a CSV" | Reads any list on any site and saves it (needs step 4) |
 | "Fill this application for Full Stack Engineer at Acme with my CV" | Fills a job application form, attaches your CV, and **stops before submitting** for you to check |
 | "/tasks" | Opens **saved tasks**: prompts you can rerun with `/name`, or run every day, every hour or on a schedule |

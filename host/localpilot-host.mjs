@@ -96,6 +96,90 @@ export function toCsv(columns, rows) {
 // ---------------------------------------------------------------------------
 // Methods
 
+// ---------------------------------------------------------------------------
+// Search: files by name (substring or * ? wildcards) and/or by text inside text files.
+
+const SEARCH_SKIP_DIRS = new Set(['node_modules', '__pycache__', 'venv', '.venv', 'dist', 'build']);
+const SEARCHABLE_TEXT = new Set(['.txt', '.md', '.csv', '.tsv', '.json', '.jsonl', '.html', '.htm', '.xml', '.yml', '.yaml', '.log', '.js', '.mjs', '.ts', '.py', '.ini', '.cfg', '.toml', '.sql', '.tex', '.bib', '.srt', '.vtt']);
+const SEARCH_MAX_ENTRIES = 50000;
+const SEARCH_MAX_FILE_BYTES = 2 * 1024 * 1024;
+const SEARCH_TIME_MS = 8000;
+
+export function namePattern(name) {
+  const n = String(name || '').trim().toLowerCase();
+  if (!n) return null;
+  if (!/[*?]/.test(n)) return (s) => s.toLowerCase().includes(n);
+  const re = new RegExp(`^${n.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`, 'i');
+  return (s) => re.test(s);
+}
+
+function firstMatchingLine(file, needle) {
+  const content = fs.readFileSync(file, 'utf8');
+  const lower = content.toLowerCase();
+  const at = lower.indexOf(needle);
+  if (at < 0) return null;
+  const lineNo = lower.slice(0, at).split('\n').length;
+  const start = content.lastIndexOf('\n', at) + 1;
+  const end = content.indexOf('\n', at);
+  const line = content.slice(start, end < 0 ? undefined : end).trim();
+  return { line: lineNo, snippet: line.length > 200 ? `${line.slice(Math.max(0, at - start - 60), at - start + 140)}…` : line };
+}
+
+function searchFiles(cfg, { root, path: rel = '.', name, text, limit = 50 }) {
+  const matchName = namePattern(name);
+  const needle = String(text || '').trim().toLowerCase();
+  if (!matchName && !needle) throw new Error('Give name (part of a file name, or a pattern like *.pdf) and/or text to look for inside files.');
+  const { abs } = resolveInRoot(cfg, root, rel);
+  const max = Math.min(Math.max(Number(limit) || 50, 1), 200);
+  const started = Date.now();
+  const results = [];
+  let scanned = 0;
+  let stopped = '';
+  const stack = [abs];
+  while (stack.length && !stopped) {
+    const dir = stack.pop();
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue; // unreadable folder
+    }
+    for (const e of entries) {
+      if (e.name.startsWith('.') || e.isSymbolicLink()) continue;
+      scanned += 1;
+      if (scanned > SEARCH_MAX_ENTRIES) stopped = `stopped after ${SEARCH_MAX_ENTRIES} entries`;
+      else if (Date.now() - started > SEARCH_TIME_MS) stopped = `stopped after ${SEARCH_TIME_MS / 1000} s`;
+      if (stopped) break;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (SEARCH_SKIP_DIRS.has(e.name)) continue;
+        stack.push(full);
+        if (matchName?.(e.name) && !needle) results.push({ path: path.relative(abs, full), type: 'dir' });
+      } else if (e.isFile()) {
+        if (matchName && !matchName(e.name)) continue;
+        const st = fs.statSync(full, { throwIfNoEntry: false });
+        if (!st) continue;
+        let hit = {};
+        if (needle) {
+          if (!SEARCHABLE_TEXT.has(path.extname(e.name).toLowerCase()) || st.size > SEARCH_MAX_FILE_BYTES) continue;
+          try {
+            hit = firstMatchingLine(full, needle);
+          } catch {
+            hit = null;
+          }
+          if (!hit) continue;
+        }
+        results.push({ path: path.relative(abs, full), type: 'file', size: st.size, modified: st.mtime.toISOString(), ...hit });
+      }
+      if (results.length >= max) {
+        stopped = `first ${max} matches`;
+        break;
+      }
+    }
+  }
+  return { path: abs, results, scanned, truncated: stopped };
+}
+
 function writeChecked(cfg, { root, path: rel, content, overwrite = false }) {
   const { root: r, abs } = resolveInRoot(cfg, root, rel);
   if (!r.writable) throw new Error(`Root "${root}" is read-only.`);
@@ -149,6 +233,10 @@ export function createHandlers(cfg) {
 
     write_file(params) {
       return writeChecked(cfg, params);
+    },
+
+    search(params) {
+      return searchFiles(cfg, params);
     },
 
     write_csv({ root, path: rel, columns, rows, overwrite = false, bom = true }) {

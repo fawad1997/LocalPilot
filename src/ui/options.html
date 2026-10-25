@@ -71,6 +71,16 @@
           <option value="auto">Act without asking (bypass permissions)</option>
         </select>
       </label>
+      <label>Web search (<code>web_search</code>)
+        <select id="searchEngine">
+          <option value="duckduckgo">DuckDuckGo first, then Bing, then Google</option>
+          <option value="bing">Bing first, then DuckDuckGo, then Google</option>
+          <option value="google">Google first, then DuckDuckGo, then Bing</option>
+        </select>
+      </label>
+      <label>Own search page instead (optional, <code>{q}</code> = the query)
+        <input id="searchUrl" type="url" spellcheck="false" placeholder="http://localhost:8888/search?q={q}" />
+      </label>
       <label class="check"><input id="screenshotMarks" type="checkbox" /> Number clickable elements on screenshots (helps small vision models click accurately)</label>
       <label class="check"><input id="recordRuns" type="checkbox" /> Record every run as an animated GIF (saved in Downloads/LocalPilot)</label>
       <label class="check"><input id="pauseOnBotCheck" type="checkbox" /> Pause and hand over to me when a CAPTCHA or bot check appears</label>
