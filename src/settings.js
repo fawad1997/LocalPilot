@@ -31,7 +31,8 @@ export const DEFAULTS = {
   requestTimeoutSec: 180,
   fallbackModels: '', // comma-separated, tried in order after the main model keeps failing
   logging: true, // JSONL diagnostics in <extension>/logs (via the PC bridge)
-  pauseOnBotCheck: true, // hand CAPTCHA / bot checks to the user
+  pauseOnBotCheck: true, // hand CAPTCHA / bot checks to the user when they are not solved
+  captchaSolver: false, // try to solve simple CAPTCHA checks by clicking them like a person
   maxTokens: 4096,
   streaming: true, // stream replies (SSE) from OpenAI-style servers; falls back automatically
   summarizeAfterTokens: 24000, // summarize older turns when the prompt grows past this (0 = never)

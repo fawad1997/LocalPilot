@@ -4,10 +4,12 @@ A Chrome side-panel browser agent that runs on **your local LLM API**. It reads 
 
 It is an independent implementation. The design came from studying how Claude in Chrome (v1.0.100) is built, using [REA](https://github.com/morluto/rea). No code or assets were copied from it.
 
+**Companion documents:** [CAPTCHA.md](CAPTCHA.md) (solver, tested sites, reproduction steps) · [COMPARISON.md](COMPARISON.md) (vs Claude in Chrome and Browser Use) · [PRIVACY.md](PRIVACY.md) (data flow and permissions) · [../README.md](../README.md) (overview and quick start).
+
 ## Install (unpacked)
 
 1. Open `chrome://extensions` and turn on **Developer mode**.
-2. Click **Load unpacked**, open `D:\AI\BrowserExtension`, and click **Select Folder**. The picker shows folders only, so the files inside are not listed. That is normal.
+2. Click **Load unpacked**, open the project folder, and click **Select Folder**. The picker shows folders only, so the files inside are not listed. That is normal.
 3. Click the toolbar icon, or press `Alt+Shift+L`, to open the side panel.
 4. Set the model server in **Settings** (gear icon) and click **Test & list models**. If the server can't be reached or rejects the key, the panel says so.
 
@@ -34,10 +36,10 @@ Click the toolbar icon (or press `Alt+Shift+L`) on a tab to open LocalPilot for 
 Claude Code ⇄ (stdio MCP) mcp-server.mjs ⇄ (named pipe + token) native host ⇄ (native messaging) extension ⇄ browser
 ```
 
-It is registered for the Jobs project (local scope), so Claude Code started in `D:\Personal Projects\Jobs` can use it:
+It is registered for the folder you start Claude Code in (local scope), so Claude Code started in your jobs folder can use it:
 
 ```bash
-claude mcp add localpilot -s local -- "C:\Program Files\nodejs\node.exe" "D:\AI\BrowserExtension\host\mcp-server.mjs"
+claude mcp add localpilot -s local -- node "<project folder>/host/mcp-server.mjs"
 claude mcp remove localpilot -s local   # undo
 ```
 
@@ -70,7 +72,9 @@ Settings: Retries per model call (default 4), Model request timeout (default 180
 
 ## CAPTCHAs and bot checks
 
-LocalPilot never solves, clicks or bypasses CAPTCHAs, and it does not hide that it is automation.
+**User-facing guide with tested sites, screenshots and reproduction steps: [CAPTCHA.md](CAPTCHA.md).** This section is the internals.
+
+By default LocalPilot never solves, clicks or bypasses CAPTCHAs: it detects them, stops and hands the tab to you. Settings → **Try to solve CAPTCHA checks myself** (off by default) adds an opt-in solver.
 
 **When it checks:** after `navigate`, clicks, typing, key presses, `read_page`, `find`, `get_page_text`, and tab switches.
 
@@ -83,9 +87,23 @@ LocalPilot never solves, clicks or bypasses CAPTCHAs, and it does not hide that 
 **When it finds one:**
 - **Side panel:** the agent pauses and shows an orange card: "LocalPilot paused: <site> showed a verification". Solve it yourself in the tab, then press **I've solved it, continue**. LocalPilot confirms the check is gone and tells the model to re-read the page. Press **Stop** to end the task instead.
 - **Claude Code / MCP:** the tool result starts with `⚠ BOT CHECK DETECTED (…)`, so Claude Code can ask you to handle it.
-- **Clicks on CAPTCHA widgets** (including inside their iframes) are refused, even if the model tries.
-- The system prompt also tells the model never to attempt one.
+- **Clicks on CAPTCHA widgets** (including inside their iframes) are refused, even if the model tries. With the solver on, the model is told to call `captcha_solve` instead of clicking blindly.
+- The system prompt tells the model never to attempt one (or, with the solver on, to use `captcha_solve` and hand over when told to).
 - To get only the warning without pausing, turn off "Pause and hand over to me…" in Settings.
+
+### The opt-in solver
+
+It is a port of the technique used by SeleniumBase's CDP mode ([undetected-testing](https://github.com/mdmintz/undetected-testing)), adapted to `chrome.debugger`:
+
+- **The page loads with the debugger detached.** `navigate` drops the debugger, lets the page and its first checks load in a normal browser, waits 1.5–3 s, then reconnects. A challenge that runs during load sees no automation channel.
+- **No `Runtime.enable` during a solving run.** Console capture is what pages measure to detect a debugger (Cloudflare/DataDome timing checks), so it stays off; `read_console_messages` turns it on for the rest of the run when the model asks, and says that earlier messages are missing.
+- **The real control is clicked, not a guessed point.** The page is scanned in every frame (cross-origin frames included) for Cloudflare's `.cb-lb`/`.cb-i` markup, reCAPTCHA's `#recaptcha-anchor`, hCaptcha's `#checkbox`, and slider handles. The point is translated to top-level CSS pixels through the iframe chain.
+- **Human-like input.** A curved, eased, jittered mouse path, a hover, a 45–110 ms press, and a small drift after release (`src/human.js`). Sliders are dragged with an overshoot; "press and hold" checks are held for ~10 s.
+- **Success is checked against the page:** a non-empty `cf-turnstile-response` / `g-recaptcha-response` / `h-captcha-response` token, or the challenge disappearing (Cloudflare often just reloads the target page). A picture grid, Arkose, Tencent or a login is reported as needing you, and the normal pause takes over.
+
+**Limits:** picture grids (reCAPTCHA/hCaptcha image challenges) are not solved, Arkose FunCaptcha is not solved, and no solver can promise a pass — it is a detection-evasion feature, and sites update their checks. It also only helps on sites where automation is allowed; the extension does not hide what it is for the user (the debugging banner stays). Turn it off again in Settings if a site behaves worse with it.
+
+**Files:** `src/captcha.js` (detection and solving), `src/human.js` (pointer), `src/stealth.js` (detached navigation), `src/frames.js` (iframe offsets).
 
 ## Diagnostic logs
 
@@ -94,7 +112,7 @@ Every task writes JSON lines to `logs/localpilot-YYYY-MM-DD.jsonl` (needs the PC
 - every model call (model, attempt, latency, status, error);
 - retries and fallbacks;
 - every tool call (input, result preview, duration, error);
-- bot checks and your decisions;
+- bot checks and your decisions, and CAPTCHA solve attempts (who, clicks, outcome);
 - MCP calls and service-worker errors.
 
 API keys and screenshot pixels are never written. See [logs/README.md](../logs/README.md) for the format and an AI prompt. For a quick overview:
@@ -146,7 +164,7 @@ node host/install.mjs --uninstall  # remove the registry entries
 The first install adds a fixed `key` to `manifest.json`, which pins the extension ID to `eaopjpgoeolndjijbelfidajiciihllh`. After installing, reload the extension in `chrome://extensions`. The side-panel header shows **PC: on** when the bridge works.
 
 `host/config.json` controls access:
-- `roots`: the folders the agent may use. The defaults are `jobs` = `D:\Personal Projects\Jobs` and `trading` = `D:\AI\Trading\quantara_v0.1\research` (for the calendar and news recipes), both writable. Job recipes use the first writable root.
+- `roots`: the folders the agent may use. The default is `jobs` = `%USERPROFILE%\LocalPilot\Jobs` (`~/LocalPilot/Jobs` elsewhere), writable; job recipes use the first writable root. Add more roots (for example the `research` folder of your Quantara install) as needed. Start from `host/config.example.json`.
 - `scripts`: allowlisted Node scripts: `import-manual-jobs`, and `log-application` (marked `"internal": true`, see **Application assistant**). Internal scripts are hidden from the model's `pc_run_script` and refused there; only LocalPilot's own flows run them.
 
 What the sandbox enforces:
@@ -219,7 +237,7 @@ The draft fills the matching `import-manual-jobs` fields (seniority, employment 
 
 **Confirming a new endpoint.** The four new recipes were built against mock sites (`tests/mock-llm.mjs`) from the sites' known API shapes. Before relying on one, log in, run a small search (`max_jobs: 5, run_import: false`) and check the CSV. If nothing is captured, find the real request: `capture_start` with a broad pattern (for example `search`) plus `read_network_requests` in a manual session. Then set `<key>ApiPattern` in settings (`liepinApiPattern`, `job51ApiPattern`, `zhaopinApiPattern`, `linkedinApiPattern`) without changing code. `<key>BaseUrl` overrides the site URL (the tests point it at the mock server).
 
-If a site shows a login or 安全验证 page, or its API returns an error (BOSS code 37, "您的环境存在异常"), the recipe pauses and asks you to handle it in the tab. It waits up to 5 minutes. It never solves verifications itself. Scraping is against these sites' terms and fast browsing can get an account restricted, so keep `max_jobs` modest.
+If a site shows a login or 安全验证 page, or its API returns an error (BOSS code 37, "您的环境存在异常"), the recipe pauses and asks you to handle it in the tab (with CAPTCHA solving on, it first tries the simple checkboxes). It waits up to 5 minutes. Scraping is against these sites' terms and fast browsing can get an account restricted, so keep `max_jobs` modest.
 
 City names (Chinese or English) map to each site's codes: 全国, 北京, 上海, 深圳, 广州, 杭州, 武汉, 成都, 南京, 苏州, 西安, 长沙 and more. Each site's raw city code also works (BOSS 9 digits, 51job 6 digits, Liepin `dq`, Zhaopin `jl`).
 
@@ -240,7 +258,7 @@ Open a job's application form in a tab and ask, for example:
 
 ## Trading: Quantara
 
-LocalPilot can read **Quantara** (`D:\AI\Trading\quantara_v0.1`), the local MT5 bot, through its own dashboard API at `http://127.0.0.1:8787`. Turn it on in **Settings → Quantara** and press **Test**. The bot must be running (`scripts\7_run_bot.bat`, or `6_run_simulation.bat` for a simulated market).
+LocalPilot can read **Quantara** (your local MT5 bot, e.g. the `quantara` project folder), through its own dashboard API at `http://127.0.0.1:8787`. Turn it on in **Settings → Quantara** and press **Test**. The bot must be running (`scripts\7_run_bot.bat`, or `6_run_simulation.bat` for a simulated market).
 
 | Tool | Reads | Use it for |
 | --- | --- | --- |
@@ -266,7 +284,7 @@ LocalPilot can read **Quantara** (`D:\AI\Trading\quantara_v0.1`), the local MT5 
 
 ### Research data for Quantara (PC root `trading`)
 
-Both recipes write to `D:\AI\Trading\quantara_v0.1\research\datasets\`. They never place, gate or suggest trades.
+Both recipes write to the Quantara project's `research\datasets\` folder (the `trading` PC root). They never place, gate or suggest trades.
 
 - **`econ_calendar_collect`**: the economic calendar from ForexFactory, week by week, `from`/`to` up to two years per run. Default: USD, high impact (Quantara's `events` defaults).
   - **Why:** Quantara's backtests read news times from its `economic_events` table. That table only had a few future FOMC dates plus the current week, so 2024–2026 backtests ran without real news blocking.
@@ -332,7 +350,7 @@ Examples:
 - **Report tab:** the report opens in a new tab (`open_report`, not for MCP calls). `save_to: {root, path}` also copies both files into a PC root.
 - **Result for the model:** counts and the 30 most serious problems, so it can explain them.
 
-**Safety:** it only opens pages with GET. It never types, fills or submits forms, and it skips links that look like log-out, delete, unsubscribe, add-to-cart, checkout, pay or order, plus file downloads. Bot checks pause for the user as everywhere else. Acting on the site needs the normal site approval.
+**Safety:** it only opens pages with GET. It never types, fills or submits forms, and it skips links that look like log-out, delete, unsubscribe, add-to-cart, checkout, pay or order, plus file downloads. Bot checks are handled as everywhere else (solved first if that is on, otherwise paused for the user). Acting on the site needs the normal site approval.
 
 **Limits:** examples are capped at 8 per problem type per page; the count still includes all of them. The phone check uses Chrome's device emulation and clears it afterwards.
 
@@ -428,6 +446,7 @@ In "Plan, then act" mode, the approved plan becomes a checklist in the panel. Th
 | `read_console_messages`, `read_network_requests` | Shows console output and network requests captured over CDP; kept when the debugger detaches |
 | `resize_window` | Resizes the window |
 | `javascript_tool` | Runs JS in the page. **Off by default**; turn it on in Settings. |
+| `captcha_solve` | With "Try to solve CAPTCHA checks myself" on: `detect` reports what check is showing, `solve` clicks it like a person (see **CAPTCHAs and bot checks**). Not offered when solving is off. |
 | `pc_search` | Finds files on the PC by name or by text inside (needs the PC bridge) |
 | `extract_list` | Detects repeating lists on any page and returns or saves them as rows, with paging (see above) |
 | `site_note` | Per-site memory: add, list or remove short notes for the current site |
@@ -489,6 +508,10 @@ examples/               demos and prompts: real/ (recorded in Chrome), demo-ai/ 
 host/jobs-scripts/      scripts installed into the Jobs folder (log-application.mjs)
 src/tools.js            tool schemas and executors (CDP input, screenshots, page scripts)
 src/cdp.js              chrome.debugger attach/release, per-tab store (console, network, captures, dialogs), input
+src/captcha.js          CAPTCHA detection and click-based solving (opt-in); provider markup, tokens, verdicts
+src/human.js            human-like CDP pointer path, click, hold and drag
+src/stealth.js          detached navigation (debugger off while a page loads) and load waiting
+src/frames.js           iframe offset in top-level viewport pixels (CDP, with a scripting fallback)
 src/content/page-agent.js  ref-tagged accessibility tree, find, form setting (injected on demand)
 src/content/indicator.js   "agent is working" frame + Stop button
 src/ui/                 side panel + settings
@@ -512,6 +535,7 @@ npm run test:e2e:phase-e     # testing mode on a buggy mock shop (every check, l
 npm run test:e2e:dialogs     # a dialog open before attach: reported at once, freed by handle_dialog; new tabs attached at once
 npm run test:e2e:antidebug   # a page that reloads or blanks itself under console capture: learned, stops, forgotten again
 npm run test:e2e:quickwins   # change reports, forgiving dropdowns, aliases, HTTP status, web_search, reconnect, pc_search, repeat notes, progress note
+npm run test:e2e:captcha     # opt-in CAPTCHA solving: a Turnstile-shaped check in a cross-origin iframe is clicked and passed; captcha_solve; solving off still hands over
 npm run test:e2e:agent       # browser state every step, covered controls, several actions, done, JSON steps, extract, the check, replay, saved values, allowed sites, PDF, plan checklist
 npm run demo                 # regenerate examples/demo: the buggy demo shop (offline, no model)
 npm run demo:ai              # regenerate examples/demo-ai: LocalPilot's agent with your model on real sites (model from src/local-defaults.json or LP_BASE_URL / LP_MODEL / LP_API_KEY)

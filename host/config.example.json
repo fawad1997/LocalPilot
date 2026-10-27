@@ -1,0 +1,19 @@
+{
+  "roots": [
+    {
+      "name": "jobs",
+      "path": "C:\\LocalPilot\\Jobs",
+      "writable": true
+    }
+  ],
+  "scripts": [
+    {
+      "name": "import-manual-jobs",
+      "root": "jobs",
+      "file": "import-manual-jobs.mjs",
+      "description": "Normalise a draft JSON of hand-collected jobs into scraper shape. Args: [\"build\", \"China/<draft>.json\"]"
+    }
+  ],
+  "maxReadBytes": 1048576,
+  "scriptTimeoutMs": 120000
+}

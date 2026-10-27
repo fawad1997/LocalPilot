@@ -5,6 +5,7 @@
 // Also gives the unpacked extension a stable ID by adding a public "key" to
 // manifest.json (once). Native messaging only accepts listed extension IDs.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -22,7 +23,7 @@ const REG_PATHS = [
 ];
 
 const DEFAULT_CONFIG = {
-  roots: [{ name: 'jobs', path: 'D:\\Personal Projects\\Jobs', writable: true }],
+  roots: [{ name: 'jobs', path: path.join(os.homedir(), 'LocalPilot', 'Jobs'), writable: true }],
   scripts: [
     {
       name: 'import-manual-jobs',

@@ -11,7 +11,9 @@ import { fileURLToPath } from 'node:url';
 import { startMockServer } from './mock-llm.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const REAL_IMPORT = 'D:\\Personal Projects\\Jobs\\import-manual-jobs.mjs';
+// Optional: your own jobs folder (set LOCALPILOT_JOBS_DIR). The fixture keeps this suite
+// runnable on a fresh clone.
+const REAL_IMPORT = path.join(process.env.LOCALPILOT_JOBS_DIR || path.join(os.homedir(), 'LocalPilot', 'Jobs'), 'import-manual-jobs.mjs');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'localpilot-boss-'));
 const jobsDir = path.join(tmp, 'Jobs');

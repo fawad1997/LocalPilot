@@ -1,4 +1,4 @@
-// Quantara tools: read the local trading bot's own dashboard (D:\AI\Trading\quantara_v0.1,
+// Quantara tools: read the local trading bot's own dashboard (your Quantara project,
 // http://127.0.0.1:8787). Read-only, except quantara_halt (the bot's emergency stop: no new
 // entries), which asks every time. Nothing here can resume trading, close positions or change
 // settings; those stay on Quantara's own dashboard.
@@ -212,7 +212,7 @@ async function getJson(base, path) {
   try {
     res = await fetchWithTimeout(base + path);
   } catch {
-    throw new Error(`Quantara dashboard not reachable at ${base}. Start it with scripts\\7_run_bot.bat (or scripts\\6_run_simulation.bat) in D:\\AI\\Trading\\quantara_v0.1.`);
+    throw new Error(`Quantara dashboard not reachable at ${base}. Start it from the Quantara project folder (scripts\\7_run_bot.bat, or scripts\\6_run_simulation.bat for a simulated market).`);
   }
   const body = await res.json().catch(() => null);
   if (!res.ok) throw new Error(`Quantara ${path} returned HTTP ${res.status}${body?.error ? `: ${body.error}` : ''}.`);

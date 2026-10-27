@@ -47,6 +47,39 @@ function quietRuntime(url) {
   return !!host && (QUIET_RUNTIME_HOSTS.test(host) || learnedQuiet.has(host));
 }
 
+// Tabs controlled by a run with CAPTCHA solving on. The Runtime domain stays off there: with
+// it on, every console call is serialized for the debugger, and Cloudflare/DataDome measure
+// that to spot automation (SeleniumBase's CDP mode never enables Runtime for this reason).
+// read_console_messages turns it on for the rest of the run when the model asks for it.
+const stealthTabs = new Set();
+
+export function setStealth(tabId, on) {
+  if (on) stealthTabs.add(tabId);
+  else stealthTabs.delete(tabId);
+  const state = stores.get(tabId);
+  if (!state || !attached.has(tabId)) return;
+  const want = !state.quiet && (!on || state.consoleRequested);
+  setRuntime(tabId, state, want);
+}
+
+// While a CAPTCHA / bot check is live, console capture is a liability: turn Runtime off for
+// this page (without remembering it for the site).
+export function muteConsole(tabId) {
+  const state = stores.get(tabId);
+  if (state) setRuntime(tabId, state, false);
+}
+
+// Console capture can start now (on request) unless the site is known to react to it.
+export async function ensureConsoleCapture(tabId) {
+  const state = await attach(tabId);
+  state.consoleRequested = true;
+  if (state.runtimeOn) return { started: false, quiet: false };
+  if (state.quiet) return { started: false, quiet: true };
+  state.runtimeOn = true;
+  await send(tabId, 'Runtime.enable').catch(() => {});
+  return { started: true, quiet: false };
+}
+
 async function learnQuiet(host) {
   if (learnedQuiet.has(host)) return;
   learnedQuiet.add(host);
@@ -55,8 +88,10 @@ async function learnQuiet(host) {
   await chrome.storage.local.set({ [QUIET_KEY]: [...hosts] }).catch(() => {});
 }
 
-// Console capture on or off for the page the tab shows (or is about to show).
+// Console capture on or off for the page the tab shows (or is about to show). A site that
+// reacts to console capture is never turned back on.
 function setRuntime(tabId, state, on) {
+  if (on && state.quiet) return;
   if (state.runtimeOn === on) return;
   state.runtimeOn = on;
   send(tabId, on ? 'Runtime.enable' : 'Runtime.disable').catch(() => {});
@@ -65,9 +100,16 @@ function setRuntime(tabId, state, on) {
 // Input and page scripts we run can make the page navigate; that is not the page reacting to us.
 const AGENT_ACTION_GRACE_MS = 2000;
 
-export function send(tabId, method, params = {}) {
+// `timeoutMs` guards a command that can hang when Chrome stops answering it (DOM lookups for a
+// frame that went away, for example) so a tool call cannot hang forever.
+export function send(tabId, method, params = {}, { timeoutMs = 0 } = {}) {
   if (method.startsWith('Input.') || method === 'Runtime.evaluate') markAgentAction(tabId);
-  return chrome.debugger.sendCommand(target(tabId), method, params);
+  const command = chrome.debugger.sendCommand(target(tabId), method, params);
+  if (!timeoutMs) return command;
+  return Promise.race([
+    command,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`The browser did not answer ${method} within ${Math.round(timeoutMs / 1000)}s.`)), timeoutMs)),
+  ]);
 }
 
 export function markAgentAction(tabId) {
@@ -88,6 +130,8 @@ function storeFor(tabId) {
       captured: [],
       capturedBytes: 0,
       runtimeOn: false,
+      quiet: false, // site reacts to console capture (anti-debugging): never turn Runtime on
+      consoleRequested: false, // read_console_messages asked for capture in this run
       lastAgentAction: 0,
       mainFrameId: null,
       pageUrl: '', // last real (non-blank) page URL in the main frame
@@ -112,7 +156,8 @@ export async function attach(tabId) {
   state.inflight.clear(); // requests from before this attachment will never report back
   const { url } = await chrome.tabs.get(tabId).catch(() => ({}));
   if (url && !url.startsWith('about:')) state.pageUrl = url;
-  state.runtimeOn = !quietRuntime(url);
+  state.quiet = quietRuntime(url);
+  state.runtimeOn = !state.quiet && !stealthTabs.has(tabId);
   state.selfReloads = [];
   const enabling = Promise.all([
     send(tabId, 'Page.enable'),
@@ -168,6 +213,12 @@ const users = new Map(); // tabId -> count
 
 export function retain(tabId) {
   users.set(tabId, (users.get(tabId) || 0) + 1);
+}
+
+// True when more than one agent is using the tab (a panel run and an MCP session, say), so
+// dropping the debugger for a stealth page load would break the other one.
+export function isShared(tabId) {
+  return (users.get(tabId) || 0) > 1;
 }
 
 export async function release(tabId) {
@@ -277,17 +328,20 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
       if (params.frameId === state.mainFrameId) watchSelfReload(source.tabId, state, params);
       break;
     case 'Page.frameStartedNavigating':
-      // Before the new page runs any script: no console capture on a quiet site.
-      if (params.frameId === state.mainFrameId && quietRuntime(params.url)) setRuntime(source.tabId, state, false);
+      // Before the new page runs any script: no console capture on a quiet site, or when the
+      // run keeps the debugger out of the page's sight.
+      if (params.frameId === state.mainFrameId && (quietRuntime(params.url) || stealthTabs.has(source.tabId))) setRuntime(source.tabId, state, false);
       break;
     case 'Page.frameNavigated': {
       if (!params.frame.parentId) {
         state.mainFrameId = params.frame.id;
         state.console.length = 0;
         state.inflight.clear();
+        state.consoleRequested = false; // the new document starts without capture, as usual
         const { url } = params.frame;
         if (!url.startsWith('about:')) state.pageUrl = url;
-        setRuntime(source.tabId, state, !quietRuntime(url));
+        state.quiet = quietRuntime(url);
+        setRuntime(source.tabId, state, !state.quiet && !stealthTabs.has(source.tabId));
       }
       break;
     }
@@ -316,6 +370,7 @@ function watchSelfReload(tabId, state, params) {
   state.selfReloads = [];
   const url = state.pageUrl;
   const host = hostOf(url);
+  state.quiet = true;
   setRuntime(tabId, state, false);
   learnQuiet(host);
   state.notices.push(

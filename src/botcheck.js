@@ -1,5 +1,8 @@
-// CAPTCHA / bot-check handling. LocalPilot never tries to solve or bypass these:
-// it detects them, stops acting, and hands the tab to the user.
+// CAPTCHA / bot-check handling. By default LocalPilot never tries to solve or bypass these:
+// it detects them, stops acting, and hands the tab to the user. With "Try to solve CAPTCHA
+// checks" on (settings.captchaSolver), it first tries the click-based solver in captcha.js.
+import * as cdp from './cdp.js';
+import { solveChallenge, PROVIDER_LABELS } from './captcha.js';
 import { log } from './logger.js';
 
 const PROVIDER_FRAMES = [
@@ -114,8 +117,9 @@ export async function captchaAtPoint(tabId, x, y) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// After a page-changing tool: if a bot check is showing, pause for the user
-// (side panel) or warn the caller (MCP). Returns text to append to the tool result.
+// After a page-changing tool: if a bot check is showing, try to solve it (when enabled),
+// otherwise pause for the user (side panel) or warn the caller (MCP). Returns text to append
+// to the tool result.
 export async function handleBotCheck(ctx, toolName) {
   const found = await detectBotCheck(ctx.tabId);
   if (!found) return '';
@@ -126,12 +130,44 @@ export async function handleBotCheck(ctx, toolName) {
     // keep empty
   }
   log('bot_check', { runId: ctx.runId, tool: toolName, host, ...found });
-  const warning = `BOT CHECK DETECTED (${found.kind}) on ${host}. Do not try to solve, click or bypass it. The user must complete it in the browser.`;
+  // No console capture while a challenge is live: it is the main way pages spot the debugger.
+  cdp.muteConsole(ctx.tabId);
+
+  let solver = null;
+  if (ctx.settings?.captchaSolver === true) {
+    try {
+      solver = await solveChallenge(ctx.tabId, { attempts: 2 });
+      log('captcha_attempt', { runId: ctx.runId, host, kind: found.kind, status: solver.status, provider: solver.provider, clicks: solver.clicks, ms: solver.ms });
+    } catch (err) {
+      log('captcha_error', { runId: ctx.runId, host, kind: found.kind, error: String(err.message || err) });
+    }
+    // A success token on the page is proof the check passed. Without one, a Cloudflare check
+    // often passes by reloading the page, so trust the page: if the challenge is gone, it is
+    // solved even when the solver had no token to see.
+    if (solver && solver.status === 'solved') {
+      log('captcha_solved', { runId: ctx.runId, host, kind: found.kind, provider: solver.provider, clicks: solver.clicks, via: 'token' });
+      await sleep(300);
+      return `\n\nA ${found.kind} check appeared on ${host}; LocalPilot solved it automatically. The page may have changed: read it again before acting.`;
+    }
+    if (solver && solver.status !== 'needs-user' && solver.status !== 'unsupported') {
+      const still = await detectBotCheck(ctx.tabId);
+      if (!still) {
+        log('captcha_solved', { runId: ctx.runId, host, kind: found.kind, provider: solver.provider, clicks: solver.clicks, via: solver.status });
+        await sleep(300);
+        return `\n\nA ${found.kind} check appeared on ${host}; LocalPilot solved it automatically. The page may have changed: read it again before acting.`;
+      }
+    }
+  }
+
+  const solverLabel = PROVIDER_LABELS[solver?.provider] || found.kind;
+  const warning = solver && solver.status !== 'none'
+    ? `BOT CHECK STILL SHOWING (${found.kind}) on ${host}. LocalPilot tried (${solverLabel}) but this one needs the user: do not try to solve, click or bypass it.`
+    : `BOT CHECK DETECTED (${found.kind}) on ${host}. Do not try to solve, click or bypass it. The user must complete it in the browser.`;
   if (ctx.mcp || ctx.settings.pauseOnBotCheck === false) return `\n\n⚠ ${warning} Ask the user to complete it, then continue.`;
 
   for (let round = 1; round <= 3; round += 1) {
-    const decision = await ctx.requestApproval({ mode: 'verification', host, kind: found.kind, tool: toolName, input: {} });
-    log('bot_check_decision', { runId: ctx.runId, host, kind: found.kind, decision, round });
+    const decision = await ctx.requestApproval({ mode: 'verification', host, kind: found.kind, tool: toolName, input: {}, solverTried: !!solver && solver.status !== 'none' });
+    log('bot_check_decision', { runId: ctx.runId, host, kind: found.kind, decision, round, solver: solver?.status || 'off' });
     if (decision !== 'continue') {
       throw new Error(`Stopped at a ${found.kind} check on ${host}. The user chose not to continue.`);
     }

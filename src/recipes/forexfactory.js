@@ -273,7 +273,7 @@ const PROBE = {
 // --- the recipe ---------------------------------------------------------------------------
 
 async function run(ctx, input) {
-  const { root } = requireRoot(ctx, 'trading', '{"name": "trading", "path": "D:\\\\AI\\\\Trading\\\\quantara_v0.1\\\\research", "writable": true}');
+  const { root } = requireRoot(ctx, 'trading', '{"name": "trading", "path": "<your Quantara research folder>", "writable": true}');
   const fromMs = parseDay(input.from);
   const toMs = parseDay(input.to);
   const weeks = weekStarts(fromMs, toMs);
@@ -334,7 +334,7 @@ async function run(ctx, input) {
     : null;
   const detailed = await writeUnique('write_csv', { root, path: `${stem}_detailed.csv`, columns: DETAILED_COLUMNS, rows: toDetailedRows(kept), bom: false });
   const untimed = kept.length - importRows.length;
-  const rel = main ? `research/datasets/${main.path.split(/[\\/]/).pop()}` : ''; // the trading root is quantara_v0.1\research
+  const rel = main ? `research/datasets/${main.path.split(/[\\/]/).pop()}` : ''; // the trading root is your Quantara research folder
   return [{
     type: 'text',
     text: [
@@ -343,7 +343,7 @@ async function run(ctx, input) {
       `Detailed file: ${detailed.path} (with actual / forecast / previous${untimed ? `; ${untimed} all-day or tentative events are only here` : ''})`,
       `Self-check: ${check.checked ? `${check.checked - check.wrong.length} of ${check.checked} fixed-time releases at their usual New York time` : 'not possible'}.`,
       ...(notes.length ? [`Notes: ${notes.join(' | ')}`] : []),
-      ...(main ? [`Next step (the user or Claude Code runs it, in D:\\AI\\Trading\\quantara_v0.1): python -m app.main import-events ${rel}`] : []),
+      ...(main ? [`Next step (the user or Claude Code runs it in the Quantara project folder): python -m app.main import-events ${rel}`] : []),
     ].join('\n'),
   }];
 }

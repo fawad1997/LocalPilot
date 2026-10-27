@@ -108,6 +108,40 @@ const WIDGET_PAGE = `<!doctype html><html><head><title>Contact</title></head><bo
 <div class="g-recaptcha" role="checkbox" aria-label="I'm not a robot" style="width:300px;height:78px;border:1px solid #888">I'm not a robot</div>
 </main></body></html>`;
 
+// A Cloudflare-Turnstile-shaped fixture: the checkbox lives in a cross-origin iframe, and the
+// check only passes when that checkbox is really clicked (then a response token is set and the
+// challenge page is replaced). Used by tests/e2e-captcha.mjs.
+const turnstilePage = (frameUrl) => `<!doctype html><html><head><title>Just a moment...</title></head><body>
+<h1>Security check</h1><p>Checking if the site connection is secure</p>
+<div class="cf-turnstile" style="width:300px;height:65px;border:1px solid #888">
+  <iframe src="${frameUrl}" width="300" height="65" style="border:0;display:block"></iframe>
+</div>
+<main id="report" hidden><h1>Welcome to the real site</h1><p>Content loaded.</p></main>
+<input type="hidden" name="cf-turnstile-response" value="">
+<script>
+addEventListener('message', (e) => {
+  if (e.data && e.data.type === 'cf-success') {
+    window.__solved = true;
+    document.querySelector('input[name="cf-turnstile-response"]').value = '0.turnstile-token-' + 'x'.repeat(48);
+    document.querySelector('.cf-turnstile').remove();
+    document.querySelector('h1').remove();
+    document.querySelector('p').remove();
+    document.getElementById('report').hidden = false;
+    document.title = 'Real site';
+  }
+});
+</script></body></html>`;
+
+const TURNSTILE_FRAME = `<!doctype html><html><head><title>Widget</title></head><body style="margin:0">
+<label class="cb-lb" style="display:flex;align-items:center;gap:8px;width:296px;height:61px;padding-left:8px;box-sizing:border-box;cursor:pointer">
+  <input type="checkbox" id="cb" style="position:absolute;opacity:0;width:1px;height:1px">
+  <span class="cb-i" style="display:inline-block;width:24px;height:24px;border:2px solid #333;border-radius:3px"></span>
+  <span>Verify you are human</span>
+</label>
+<script>
+document.getElementById('cb').addEventListener('change', () => parent.postMessage({ type: 'cf-success' }, '*'));
+</script></body></html>`;
+
 // ---------------------------------------------------------------------------
 // Phase C mock job boards. Each search page fetches its own JSON API (like the real
 // sites do) for the page number in its URL; 10 jobs per page.
@@ -325,6 +359,8 @@ function scriptedFlow(messages, base, steps) {
 
 const FLOWS = {
   'CAPTCHA-FLOW': [() => ['navigate', { url: 'BASE/captcha' }]],
+  // CAPTCHA solving on: the Turnstile checkbox is clicked for real, then the page is read.
+  'CAPTCHA-SOLVE-FLOW': [() => ['navigate', { url: 'BASE/turnstile' }], () => ['get_page_text', {}]],
   // Plan mode: the approved plan is assistant message 0, so tool steps start at 1.
   'PLAN-FLOW': [null, () => ['navigate', { url: 'BASE/page' }], () => ['get_page_text', {}]],
   'LONG-FLOW': Array.from({ length: 8 }, () => () => ['get_page_text', {}]),
@@ -675,6 +711,18 @@ customElements.define('my-input', class extends HTMLElement {
     }
     if (url.pathname === '/widget') {
       res.writeHead(200, { 'content-type': 'text/html' }).end(WIDGET_PAGE);
+      return;
+    }
+    if (url.pathname === '/turnstile') {
+      // The iframe is served from the other loopback name, so it is a real cross-origin frame.
+      const hostHeader = req.headers.host || '127.0.0.1';
+      const port = hostHeader.split(':')[1] || '80';
+      const other = hostHeader.startsWith('127.0.0.1') ? `localhost:${port}` : `127.0.0.1:${port}`;
+      res.writeHead(200, { 'content-type': 'text/html' }).end(turnstilePage(`http://${other}/turnstile-frame`));
+      return;
+    }
+    if (url.pathname === '/turnstile-frame') {
+      res.writeHead(200, { 'content-type': 'text/html' }).end(TURNSTILE_FRAME);
       return;
     }
     if (url.pathname === '/web/geek/jobs') {

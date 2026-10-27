@@ -10,6 +10,9 @@ import { fillSavedValues, maskSavedValues, allowedHost } from './savedvalues.js'
 import { TEST_WEBSITE_DEF, testWebsite } from './sitetest.js';
 import { checkSubmitGuard } from './recipes/apply.js';
 import { handleBotCheck, captchaAtPoint } from './botcheck.js';
+import { solveChallenge, scanChallenge, describeChallenge, PROVIDER_LABELS } from './captcha.js';
+import { stealthNavigate } from './stealth.js';
+import { frameOffset } from './frames.js';
 import { WEB_SEARCH_DEF, SEARCH_APPROVAL, webSearch } from './websearch.js';
 import { EXTRACT_DEF, SEARCH_PAGE_DEF, extract, searchPage } from './extract.js';
 import { log } from './logger.js';
@@ -32,6 +35,7 @@ const coordinate = {
 export function toolDefinitions(settings, host = null, attachments = []) {
   return [
     ...browserToolDefinitions(settings),
+    ...(settings.captchaSolver === true ? [CAPTCHA_DEF] : []),
     WEB_SEARCH_DEF,
     SAVE_PDF_DEF,
     EXTRACT_DEF,
@@ -385,42 +389,6 @@ async function callAllFrames(tabId, fn, ...args) {
     .map((r) => ({ frameId: r.frameId, url: urlOf.get(r.frameId) || '', value: r.result.value }));
 }
 
-// Offset of a frame's viewport inside the top-level viewport (CSS px), walking up
-// through parent frames. Each parent lists its <iframe> boxes; the child is matched
-// by URL, in document order among same-URL siblings.
-async function frameOffset(tabId, frameId) {
-  if (!frameId) return { x: 0, y: 0 };
-  const frames = await chrome.webNavigation.getAllFrames({ tabId });
-  const byId = new Map(frames.map((f) => [f.frameId, f]));
-  let x = 0;
-  let y = 0;
-  for (let cur = byId.get(frameId); cur && cur.frameId !== 0; cur = byId.get(cur.parentFrameId)) {
-    const siblings = frames.filter((f) => f.parentFrameId === cur.parentFrameId && f.url === cur.url).sort((a, b) => a.frameId - b.frameId);
-    const index = siblings.findIndex((f) => f.frameId === cur.frameId);
-    const [res] = await chrome.scripting.executeScript({
-      target: { tabId, frameIds: [cur.parentFrameId] },
-      func: (url, i) => {
-        const same = [...document.querySelectorAll('iframe, frame')].filter((f) => {
-          try {
-            return new URL(f.src || 'about:blank', location.href).href === url || (!f.src && url.startsWith('about:'));
-          } catch {
-            return false;
-          }
-        });
-        const el = same[i] || same[0];
-        if (!el) return null;
-        const r = el.getBoundingClientRect();
-        return { x: r.left + el.clientLeft, y: r.top + el.clientTop };
-      },
-      args: [cur.url, Math.max(0, index)],
-    });
-    if (!res?.result) throw new Error(`Could not locate frame ${frameId} on the page.`);
-    x += res.result.x;
-    y += res.result.y;
-  }
-  return { x, y };
-}
-
 // Center of a ref (any frame) in top-level viewport CSS px, scrolled into view.
 async function locateRef(tabId, ref) {
   const { frameId, ref: local } = parseRef(ref);
@@ -771,6 +739,19 @@ export function normalizeToolCall(name, input = {}) {
   return { name: n, input: args };
 }
 
+const CAPTCHA_DEF = {
+  name: 'captcha_solve',
+  description:
+    'Try to pass the CAPTCHA / "verify you are human" check showing in the controlled tab the way a person would: it finds the real checkbox (Cloudflare Turnstile or challenge, reCAPTCHA, hCaptcha), sliders and press-and-hold checks, and clicks it with a human-like mouse path. ' +
+    'Use it when a tool result says a check appeared. It cannot solve picture grids: it reports that, and the user must then solve the check in the tab.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      action: { type: 'string', enum: ['solve', 'detect'], description: 'detect: only report what is showing (default solve).' },
+    },
+  },
+};
+
 const SAVE_PDF_DEF = {
   name: 'save_pdf',
   description: 'Save the current page as a PDF in Downloads/LocalPilot (backgrounds included). Returns the file path.',
@@ -785,6 +766,32 @@ async function savePdf(ctx, input) {
   const name = `${safeFileName(input.filename || tab.title || tab.url)}_${stamp()}.pdf`;
   const saved = await saveDownload(bytes, name, 'application/pdf');
   return [text(`Saved the page as a PDF (${Math.round(bytes.length / 1024)} KB): ${saved.path}`)];
+}
+
+const CAPTCHA_NEEDS_USER = {
+  'needs-user': (label) => `A ${label} picture/selection challenge is showing. LocalPilot cannot solve those: ask the user to complete it in the tab, then continue.`,
+  unsupported: (label) => `The ${label} check cannot be passed by clicking. Ask the user to complete it in the tab, then continue.`,
+  failed: (label, clicks) => `The ${label} check is still showing after ${clicks} click${clicks === 1 ? '' : 's'}. Ask the user to complete it in the tab (or to try again in a new tab).`,
+  none: () => 'No CAPTCHA or bot check is showing in the tab now.',
+};
+
+async function captchaSolve(ctx, input = {}) {
+  if (ctx.settings.captchaSolver !== true) {
+    throw new Error('CAPTCHA solving is off. Turn on Settings → "Try to solve CAPTCHA checks", or ask the user to solve the check in the tab.');
+  }
+  const action = input.action || 'solve';
+  if (action === 'detect') return [text(describeChallenge(await scanChallenge(ctx.tabId)))];
+  const res = await solveChallenge(ctx.tabId, { attempts: 3 });
+  const label = PROVIDER_LABELS[res.provider] || res.provider || 'bot check';
+  log('captcha_solve', { runId: ctx.runId, status: res.status, provider: res.provider, clicks: res.clicks, ms: res.ms });
+  if (res.status === 'solved') {
+    await sleep(400);
+    await settle(ctx.tabId, 3500).catch(() => {});
+    const tab = await tabInfo(ctx.tabId).catch(() => null);
+    return [text(`Solved the ${label} check (${res.clicks} click${res.clicks === 1 ? '' : 's'}).${tab ? ` Now on "${tab.title}" ${tab.url}.` : ''} Read the page again before acting: it may have changed.`)];
+  }
+  const make = CAPTCHA_NEEDS_USER[res.status] || CAPTCHA_NEEDS_USER.failed;
+  return [text(make(label, res.clicks))];
 }
 
 // A saved task can be limited to some sites (ctx.allowedDomains): no navigating or acting elsewhere.
@@ -823,7 +830,7 @@ function maskBlocks(ctx, blocks) {
 // Saved-task replay. While ctx.trace is an array, every successful step that changes something or
 // produces a result is recorded, elements as fingerprints (refs do not survive a reload).
 // Pure looking around (read_page, find, screenshots, web_search) is not: replay needs no eyes.
-const TRACE_SKIP = new Set(['read_page', 'find', 'tabs_context', 'read_console_messages', 'read_network_requests', 'site_note', 'web_search', 'resize_window', 'done']);
+const TRACE_SKIP = new Set(['read_page', 'find', 'tabs_context', 'read_console_messages', 'read_network_requests', 'site_note', 'web_search', 'resize_window', 'done', 'captcha_solve']);
 const TRACE_SKIP_ACTIONS = new Set(['screenshot', 'zoom', 'wait', 'hover']);
 // Steps whose output is the task's result: the last one is what a replay reports.
 export const RESULT_TOOLS = new Set(['get_page_text', 'extract', 'search_page', 'extract_list', 'capture_read', 'capture_save']);
@@ -946,6 +953,7 @@ async function runAndReconnect(ctx, name, input) {
 export async function runTool(ctx, rawName, rawInput = {}) {
   const { name, input: asked } = normalizeToolCall(rawName, rawInput);
   await checkAllowedSites(ctx, name, asked);
+  cdp.setStealth(ctx.tabId, ctx.settings.captchaSolver === true);
   if (TABLESS.has(name)) {
     await checkApproval(ctx, name, asked);
     return maskBlocks(ctx, await runToolInner(ctx, name, asked));
@@ -1073,6 +1081,8 @@ async function runToolInner(ctx, name, input) {
     }
     case 'javascript_tool':
       return javascriptTool(ctx, input);
+    case 'captcha_solve':
+      return captchaSolve(ctx, input);
     case 'handle_dialog': {
       const d = await cdp.handleDialog(ctx.tabId, input.accept, input.prompt_text);
       log('dialog_handled', { runId: ctx.runId, type: d.type, message: d.message, accept: !!input.accept, reloaded: !!d.reloaded });
@@ -1290,6 +1300,10 @@ async function navigate(ctx, { url }) {
   const { tabId } = ctx;
   if (url === 'back' || url === 'forward') {
     await (url === 'back' ? chrome.tabs.goBack(tabId) : chrome.tabs.goForward(tabId)).catch(() => {});
+  } else if (ctx.settings.captchaSolver === true) {
+    // Load the page while the debugger is detached, so a bot check that runs during load
+    // cannot see it (the UC-mode trick from SeleniumBase).
+    await stealthNavigate(tabId, normalizeUrl(url));
   } else {
     await chrome.tabs.update(tabId, { url: normalizeUrl(url) });
   }
@@ -1376,8 +1390,10 @@ async function computer(ctx, input) {
       await checkSubmitGuard(ctx, 'click', { x, y });
       const widget = await captchaAtPoint(tabId, x, y);
       if (widget) {
-        log('bot_check_click_refused', { runId: ctx.runId, x, y, widget });
-        throw new Error('Refusing to click a CAPTCHA / verification widget. LocalPilot never solves these: ask the user to complete it in the tab.');
+        log('bot_check_click_refused', { runId: ctx.runId, x, y, widget, solver: ctx.settings.captchaSolver === true });
+        throw new Error(ctx.settings.captchaSolver === true
+          ? 'Refusing to click a CAPTCHA / verification widget blindly. LocalPilot solves these itself: call captcha_solve (it also runs automatically after page actions).'
+          : 'Refusing to click a CAPTCHA / verification widget. LocalPilot never solves these: ask the user to complete it in the tab.');
       }
       const button = action === 'right_click' ? 'right' : 'left';
       const clickCount = { double_click: 2, triple_click: 3 }[action] || 1;
@@ -1462,13 +1478,15 @@ async function tabsContext(ctx, input = {}) {
 }
 
 async function readConsole(ctx, { pattern, only_errors: onlyErrors, limit = 100 }) {
+  const capture = await cdp.ensureConsoleCapture(ctx.tabId);
   const state = await cdp.attach(ctx.tabId);
   let rows = state.console;
   if (onlyErrors) rows = rows.filter((r) => r.level === 'error' || r.level === 'exception');
   if (pattern) rows = rows.filter((r) => r.text.includes(pattern));
   rows = rows.slice(-limit);
-  if (!rows.length) return [text('No console messages captured (capture starts when the agent first attaches to the tab).')];
-  return [text(rows.map((r) => `[${r.level}] ${r.text}`).join('\n'))];
+  const late = capture.started ? 'Console capture started with this call (CAPTCHA solving keeps the debugger quiet until a page reads the console), so earlier messages are not here.\n' : '';
+  if (!rows.length) return [text(`${late}No console messages captured${capture.quiet ? ' (this site reacts to console capture, so it stays off)' : ''}.`)];
+  return [text(late + rows.map((r) => `[${r.level}] ${r.text}`).join('\n'))];
 }
 
 async function readNetwork(ctx, { url_pattern: pattern, limit = 100 }) {

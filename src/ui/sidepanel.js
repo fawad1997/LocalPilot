@@ -263,7 +263,7 @@ function addApplyReview(e) {
   add(node);
 }
 
-function addApproval({ id, mode, host, tool, input, kind, plan, onceOnly }) {
+function addApproval({ id, mode, host, tool, input, kind, plan, onceOnly, solverTried }) {
   if (mode === 'plan') {
     addPlanApproval({ id, plan });
     return;
@@ -283,7 +283,9 @@ function addApproval({ id, mode, host, tool, input, kind, plan, onceOnly }) {
     node.querySelectorAll('button')[1].remove();
     stop.textContent = 'Stop';
     node.classList.add('verification');
-    node.querySelector('.approval-text').innerHTML = 'LocalPilot paused: <strong></strong> showed a verification (<span></span>).<br><small>Complete it yourself in the tab. LocalPilot never solves CAPTCHAs.</small>';
+    node.querySelector('.approval-text').innerHTML = solverTried
+      ? 'LocalPilot paused: <strong></strong> showed a verification (<span></span>).<br><small>LocalPilot tried to solve it, but this one needs you. Complete it in the tab.</small>'
+      : 'LocalPilot paused: <strong></strong> showed a verification (<span></span>).<br><small>Complete it yourself in the tab. LocalPilot never solves CAPTCHAs.</small>';
     node.querySelector('strong').textContent = host;
     node.querySelector('span').textContent = String(kind || 'bot check').replace(/-/g, ' ');
   } else if (onceOnly) {
@@ -923,8 +925,11 @@ const modelSelect = document.getElementById('model-select');
 
 // models: ids, or { id, name, note } from listModelInfo. The server's name shows what a
 // model really is (e.g. "claude-opus-4-5 · Opus slot (routed to gemini-flash)").
+// Models the server flags as unusable (no key, disabled, exhausted) are hidden, except the
+// current one, which stays listed with its note so the user sees why it fails.
 function setModelOptions(models, current) {
-  const info = new Map(models.map((m) => (typeof m === 'string' ? [m, { id: m }] : [m.id, m])));
+  const usable = models.filter((m) => typeof m === 'string' || !m.note || m.id === current);
+  const info = new Map(usable.map((m) => (typeof m === 'string' ? [m, { id: m }] : [m.id, m])));
   const list = [...new Set([current, ...info.keys()].filter(Boolean))];
   modelSelect.textContent = '';
   for (const id of list) {

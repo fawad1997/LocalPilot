@@ -457,6 +457,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     probe().then(sendResponse);
     return true;
   }
+  if (msg?.type === 'boss-unread' && sender.url?.startsWith('https://www.zhipin.com/')) {
+    // Only a rise in the unread count counts as news; the agent run clears it by reading the chats.
+    if (msg.count > (msg.previous ?? 0)) {
+      notify('boss-unread', 'BOSS: new message', `${msg.count} unread on BOSS直聘`);
+      fetch('http://127.0.0.1:4777/api/unread', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ count: msg.count }) })
+        .catch(() => {}); // dashboard server not running: the notification still shows
+    }
+    return;
+  }
   if (msg?.type !== 'STOP_AGENT' || !sender.tab) return;
   for (const conv of conversations.values()) {
     if (conv.running?.tabId === sender.tab.id) {
@@ -491,7 +500,7 @@ globalThis.__localPilotTest = {
       emit: (e) => events.push(e.type === 'tool_result' ? { ...e, content: e.content.map((c) => (c.type === 'image' ? { type: 'image', bytes: c.data.length } : c)) } : e),
       requestApproval: async (req) => {
         if (req.mode === 'verification') {
-          events.push({ type: 'verification', host: req.host, kind: req.kind });
+          events.push({ type: 'verification', host: req.host, kind: req.kind, solverTried: !!req.solverTried });
           return verification;
         }
         if (req.mode === 'plan') {

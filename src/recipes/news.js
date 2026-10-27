@@ -166,7 +166,7 @@ async function readListPage(ctx, url) {
 // --- the recipe ------------------------------------------------------------------------------
 
 async function run(ctx, input) {
-  const { root } = requireRoot(ctx, 'trading', '{"name": "trading", "path": "D:\\\\AI\\\\Trading\\\\quantara_v0.1\\\\research", "writable": true}');
+  const { root } = requireRoot(ctx, 'trading', '{"name": "trading", "path": "<your Quantara research folder>", "writable": true}');
   const symbols = [...new Set((input.symbols?.length ? input.symbols : ['XAUUSD', 'USD']).map(baseSymbol).filter(Boolean))];
   const keywords = { ...DEFAULT_KEYWORDS, ...Object.fromEntries(Object.entries(input.keywords || {}).map(([k, v]) => [baseSymbol(k), Array.isArray(v) ? v : String(v).split(',')])) };
   const hours = Math.min(Math.max(Number(input.hours) || 24, 1), 24 * 14);

@@ -11,14 +11,21 @@ import { fileURLToPath } from 'node:url';
 import { startMockServer } from './mock-llm.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const REAL_JOBS = 'D:\\Personal Projects\\Jobs';
+// Optional: a local jobs folder with your own scripts. The fixtures keep this suite runnable
+// on a fresh clone (set LOCALPILOT_JOBS_DIR to use your own).
+const REAL_JOBS = process.env.LOCALPILOT_JOBS_DIR || path.join(os.homedir(), 'LocalPilot', 'Jobs');
+const FIXTURES = path.join(root, 'tests', 'fixtures');
+const jobsTool = (rel) => {
+  const local = path.join(REAL_JOBS, rel);
+  return fs.existsSync(local) ? local : path.join(FIXTURES, path.basename(rel));
+};
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'localpilot-c-'));
 const jobsDir = path.join(tmp, 'Jobs');
 const today = new Date().toISOString().slice(0, 10);
 fs.mkdirSync(path.join(jobsDir, 'China', 'Applications', 'Acme'), { recursive: true });
 fs.mkdirSync(path.join(jobsDir, 'lib'), { recursive: true });
-fs.copyFileSync(path.join(REAL_JOBS, 'import-manual-jobs.mjs'), path.join(jobsDir, 'import-manual-jobs.mjs'));
-fs.copyFileSync(path.join(REAL_JOBS, 'lib', 'tracker-utils.mjs'), path.join(jobsDir, 'lib', 'tracker-utils.mjs'));
+fs.copyFileSync(jobsTool('import-manual-jobs.mjs'), path.join(jobsDir, 'import-manual-jobs.mjs'));
+fs.copyFileSync(jobsTool('lib/tracker-utils.mjs'), path.join(jobsDir, 'lib', 'tracker-utils.mjs'));
 fs.copyFileSync(path.join(root, 'host', 'jobs-scripts', 'log-application.mjs'), path.join(jobsDir, 'log-application.mjs'));
 fs.writeFileSync(path.join(jobsDir, 'China', 'Applications', 'Acme', 'CV_Fawad.pdf'), Buffer.alloc(2048, 1));
 fs.writeFileSync(path.join(jobsDir, 'cv_data.json'), JSON.stringify({
