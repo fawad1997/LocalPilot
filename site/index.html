@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LocalPilot</title>
+<meta name="description" content="A browser agent in Chrome's side panel, powered by your own local AI model. Your real browser, nothing leaves your machine, no account.">
+<meta property="og:title" content="LocalPilot: a browser agent that runs on your model">
+<meta property="og:description" content="Chrome side-panel agent for Ollama, LM Studio, llama.cpp, vLLM and any OpenAI/Anthropic-compatible server. Free, open source, no account.">
+<meta property="og:image" content="https://fawad1997.github.io/LocalPilot/docs/img/sidepanel.png">
+<meta property="og:url" content="https://fawad1997.github.io/LocalPilot/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #fbfaff; --bg-alt: #f3f0fb; --surface: #ffffff; --text: #17142a; --muted: #5d5873;
+  --line: #e4dff2; --accent: #7c3aed; --accent-2: #a855f7; --accent-soft: #efe7ff; --on-accent: #ffffff;
+  --code-bg: #1b1730; --code-text: #ece8ff; --ok: #15803d; --no: #b91c1c;
+  --shadow: 0 1px 2px rgba(23,20,42,.06), 0 12px 32px -12px rgba(76,29,149,.18);
+  --radius: 14px; --max: 1120px;
+  --font: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e0c18; --bg-alt: #151225; --surface: #1a1630; --text: #eeeaff; --muted: #a49fbf;
+    --line: #2b2645; --accent: #a78bfa; --accent-2: #c084fc; --accent-soft: #261d45; --on-accent: #120e22;
+    --code-bg: #0a0814; --code-text: #e7e2ff; --ok: #4ade80; --no: #f87171;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 32px -12px rgba(0,0,0,.6);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e0c18; --bg-alt: #151225; --surface: #1a1630; --text: #eeeaff; --muted: #a49fbf;
+  --line: #2b2645; --accent: #a78bfa; --accent-2: #c084fc; --accent-soft: #261d45; --on-accent: #120e22;
+  --code-bg: #0a0814; --code-text: #e7e2ff; --ok: #4ade80; --no: #f87171;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 32px -12px rgba(0,0,0,.6);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 72px; }
+body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 17px; line-height: 1.6; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+img, video { max-width: 100%; display: block; }
+a { color: var(--accent); }
+:focus-visible { outline: 3px solid var(--accent-2); outline-offset: 2px; border-radius: 6px; }
+.wrap { max-width: var(--max); margin: 0 auto; padding: 0 16px; }
+@media (min-width: 720px) { .wrap { padding: 0 28px; } }
+.skip { position: absolute; left: -999px; top: 8px; background: var(--accent); color: var(--on-accent); padding: 8px 14px; border-radius: 8px; z-index: 100; }
+.skip:focus { left: 8px; }
+
+/* Nav */
+header.nav { position: sticky; top: 0; z-index: 50; background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
+.nav .wrap { display: flex; align-items: center; gap: 20px; height: 60px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 800; color: var(--text); text-decoration: none; letter-spacing: -.01em; }
+.brand img { width: 28px; height: 28px; border-radius: 7px; }
+.badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); }
+.nav-links { display: flex; gap: 22px; margin-left: auto; align-items: center; }
+.nav-links a { color: var(--muted); text-decoration: none; font-size: 15px; font-weight: 500; }
+.nav-links a:hover { color: var(--text); }
+.icon-btn { background: none; border: 1px solid var(--line); color: var(--text); border-radius: 9px; width: 36px; height: 36px; display: grid; place-items: center; cursor: pointer; }
+@media (max-width: 760px) { .nav-links .hide-sm { display: none; } .nav-links { gap: 14px; } }
+
+/* Buttons */
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 20px; border-radius: 11px; font-weight: 600; font-size: 16px; text-decoration: none; border: 1px solid transparent; cursor: pointer; }
+.btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: var(--on-accent); box-shadow: var(--shadow); }
+.btn-primary:hover { filter: brightness(1.06); }
+.btn-ghost { border-color: var(--line); color: var(--text); background: var(--surface); }
+.btn-ghost:hover { border-color: var(--accent); }
+
+/* Hero */
+.hero { padding: 64px 0 40px; position: relative; }
+.hero::before { content: ''; position: absolute; inset: -200px 0 auto 0; height: 600px; background: radial-gradient(600px 300px at 70% 30%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 70%); pointer-events: none; z-index: -1; }
+.hero-grid { display: grid; gap: 40px; align-items: center; }
+.hero-grid > *, .mcp > *, .steps > * { min-width: 0; }
+@media (min-width: 960px) { .hero-grid { grid-template-columns: 1fr 1.15fr; } .hero { padding: 88px 0 56px; } }
+.eyebrow { display: inline-flex; gap: 8px; align-items: center; font-size: 13px; font-weight: 600; color: var(--accent); background: var(--accent-soft); padding: 5px 12px; border-radius: 99px; }
+h1 { font-size: clamp(38px, 6vw, 62px); line-height: 1.04; letter-spacing: -.035em; margin: 18px 0 18px; font-weight: 800; }
+h1 em { font-style: normal; background: linear-gradient(135deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.lede { font-size: 19px; color: var(--muted); margin: 0 0 26px; max-width: 34em; }
+.points { list-style: none; padding: 0; margin: 0 0 30px; display: grid; gap: 8px; }
+.points li { display: flex; gap: 10px; align-items: baseline; }
+.points li::before { content: '✓'; color: var(--accent); font-weight: 800; }
+.cta-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.meta { margin-top: 18px; font-size: 14px; color: var(--muted); }
+
+.frame { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.frame-bar { display: flex; align-items: center; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--bg-alt); }
+.frame-bar i { width: 11px; height: 11px; border-radius: 50%; background: var(--line); }
+.frame-bar span { margin-left: 10px; font-size: 12px; color: var(--muted); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.frame img, .frame video { width: 100%; height: auto; }
+.frame-media { position: relative; }
+.sound { position: absolute; right: 12px; bottom: 12px; background: rgba(15,12,30,.75); color: #fff; border: 0; border-radius: 99px; padding: 7px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.caption { font-size: 14px; color: var(--muted); margin: 12px 4px 0; }
+.caption b { color: var(--text); }
+
+/* Sections */
+section.block { padding: 72px 0; }
+section.alt { background: var(--bg-alt); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.kicker { font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); margin: 0 0 8px; }
+h2 { font-size: clamp(28px, 4vw, 40px); letter-spacing: -.025em; line-height: 1.12; margin: 0 0 14px; }
+.sub { color: var(--muted); max-width: 42em; margin: 0 0 36px; font-size: 18px; }
+.grid { display: grid; gap: 18px; }
+@media (min-width: 640px) { .g2 { grid-template-columns: repeat(2, 1fr); } .g3 { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 960px) { .g3 { grid-template-columns: repeat(3, 1fr); } .g4 { grid-template-columns: repeat(4, 1fr); } }
+@media (min-width: 640px) and (max-width: 959px) { .g4 { grid-template-columns: repeat(2, 1fr); } }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; }
+.card h3 { margin: 10px 0 6px; font-size: 18px; letter-spacing: -.01em; }
+.card p { margin: 0; color: var(--muted); font-size: 15.5px; }
+.ico { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-size: 20px; }
+
+/* Examples */
+.tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 24px; }
+.tab { border: 1px solid var(--line); background: var(--surface); color: var(--muted); padding: 8px 16px; border-radius: 99px; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; }
+.tab[aria-selected="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
+.ex { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; display: flex; flex-direction: column; cursor: zoom-in; text-align: left; padding: 0; font: inherit; color: inherit; transition: transform .15s, box-shadow .15s; }
+.ex:hover { transform: translateY(-3px); box-shadow: var(--shadow); }
+.ex .thumb { aspect-ratio: 16 / 10; background: var(--bg-alt); overflow: hidden; border-bottom: 1px solid var(--line); }
+.ex .thumb img, .ex .thumb video { width: 100%; height: 100%; object-fit: cover; object-position: top; }
+.ex .body { padding: 16px 18px 18px; }
+.tag { font-size: 12px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: .06em; }
+.ex h3 { margin: 6px 0 6px; font-size: 17px; line-height: 1.35; }
+.ex p { margin: 0; color: var(--muted); font-size: 14.5px; }
+.ex[hidden] { display: none; }
+
+.shots { display: grid; gap: 14px; grid-template-columns: repeat(2, 1fr); }
+@media (min-width: 900px) { .shots { grid-template-columns: repeat(4, 1fr); } }
+.shots figure { margin: 0; }
+.shots img { border-radius: 10px; border: 1px solid var(--line); aspect-ratio: 4 / 3; object-fit: cover; width: 100%; }
+.shots figcaption { font-size: 13px; color: var(--muted); margin-top: 6px; }
+.note { border-left: 3px solid var(--accent); padding: 10px 16px; background: var(--accent-soft); border-radius: 0 10px 10px 0; font-size: 15px; margin-top: 22px; }
+
+/* Code */
+.code { position: relative; background: var(--code-bg); color: var(--code-text); border-radius: 12px; padding: 16px 52px 16px 18px; font-family: var(--mono); font-size: 14px; line-height: 1.6; overflow-x: auto; white-space: pre; }
+.code .c { color: #8f88b5; }
+.copy { position: absolute; top: 10px; right: 10px; background: rgba(255,255,255,.08); color: var(--code-text); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; font: 600 12px var(--font); padding: 5px 9px; cursor: pointer; }
+.copy:hover { background: rgba(255,255,255,.16); }
+
+.steps { counter-reset: s; display: grid; gap: 18px; }
+@media (min-width: 960px) { .steps { grid-template-columns: repeat(3, 1fr); } }
+.step { counter-increment: s; }
+.step h3::before { content: counter(s); display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-size: 14px; margin-right: 10px; }
+.step ol { margin: 8px 0 14px; padding-left: 20px; color: var(--muted); font-size: 15.5px; }
+.step .code { font-size: 13px; }
+kbd { font-family: var(--mono); font-size: 13px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px; background: var(--surface); }
+
+.mcp { display: grid; gap: 32px; align-items: center; }
+@media (min-width: 960px) { .mcp { grid-template-columns: 1fr 1fr; } }
+.flow { font-family: var(--mono); font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 18px 0; }
+.flow span { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 4px 9px; color: var(--text); }
+
+/* Table */
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 15px; }
+th, td { padding: 13px 16px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+thead th { font-size: 14px; background: var(--bg-alt); }
+thead th:nth-child(2) { color: var(--accent); }
+tbody tr:last-child td { border-bottom: 0; }
+td:first-child { font-weight: 600; white-space: nowrap; }
+td.us { background: color-mix(in srgb, var(--accent-soft) 55%, transparent); }
+
+/* Closing CTA */
+.final { text-align: center; padding: 96px 0; }
+.final h2 { font-size: clamp(34px, 5vw, 54px); }
+.final .cta-row { justify-content: center; margin-top: 26px; }
+
+footer { border-top: 1px solid var(--line); padding: 32px 0 44px; color: var(--muted); font-size: 14px; }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 14px 26px; align-items: center; }
+footer a { color: var(--muted); }
+footer .grow { flex: 1; }
+
+/* Lightbox */
+dialog.lb { border: 0; padding: 0; background: transparent; max-width: min(1100px, 94vw); max-height: 92vh; }
+dialog.lb::backdrop { background: rgba(8,6,18,.82); }
+dialog.lb img, dialog.lb video { max-height: 80vh; width: auto; margin: 0 auto; border-radius: 10px; }
+dialog.lb p { color: #e9e5ff; text-align: center; margin: 12px 8px 0; font-size: 15px; }
+dialog.lb button { position: fixed; top: 16px; right: 16px; background: rgba(255,255,255,.14); color: #fff; border: 0; width: 40px; height: 40px; border-radius: 50%; font-size: 22px; cursor: pointer; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .ex { transition: none; } }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="favicon.png" alt="" width="28" height="28">LocalPilot <span class="badge">v0.10</span></a>
+    <nav class="nav-links" aria-label="Main">
+      <a class="hide-sm" href="#features">Features</a>
+      <a href="#examples">Examples</a>
+      <a class="hide-sm" href="#mcp">Claude Code</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/fawad1997/LocalPilot" aria-label="LocalPilot on GitHub"><svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a>
+      <button class="icon-btn" id="theme" type="button" aria-label="Toggle dark mode">◐</button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="hero" id="top">
+  <div class="wrap hero-grid">
+    <div>
+      <span class="eyebrow">Free · open source · MIT</span>
+      <h1>A browser agent that runs on <em>your</em> model.</h1>
+      <p class="lede">LocalPilot lives in Chrome's side panel. It opens pages, reads them, clicks, types, fills forms and takes screenshots while you watch, powered by Ollama, LM Studio, llama.cpp, vLLM or any OpenAI/Anthropic-compatible server.</p>
+      <ul class="points">
+        <li>Your real Chrome: your logins, cookies and tabs</li>
+        <li>Pages and prompts go only to the model you run</li>
+        <li>No account, no subscription, no telemetry</li>
+      </ul>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="#install">Install in 3 steps</a>
+        <a class="btn btn-ghost" href="https://github.com/fawad1997/LocalPilot">View on GitHub</a>
+      </div>
+      <p class="meta">Chrome 116+ and other Chromium browsers · the PC-bridge installer is Windows-only</p>
+    </div>
+    <div>
+      <div class="frame">
+        <div class="frame-bar"><i></i><i></i><i></i><span>books.toscrape.com · LocalPilot side panel</span></div>
+        <div class="frame-media">
+<!--HERO-GIF-->
+          <img src="examples/demo-ai/books.gif" alt="LocalPilot's AI opens the Travel category on books.toscrape.com and reads every price" width="1280" height="800">
+<!--/HERO-GIF-->
+<!--HERO-VIDEO
+          <video id="hero-video" src="media/hero.mp4" poster="media/hero.jpg" autoplay muted loop playsinline aria-label="LocalPilot product video"></video>
+          <button class="sound" id="sound" type="button">🔊 Tap for sound</button>
+-->
+        </div>
+      </div>
+      <p class="caption">Prompt: <b>“Find the cheapest book in the Travel category on this site.”</b> It answered £23.21, which is correct: 4 tool calls in 20 s.</p>
+    </div>
+  </div>
+</section>
+
+<section class="block alt" id="features">
+  <div class="wrap">
+    <p class="kicker">Why LocalPilot</p>
+    <h2>Private by default. In your browser. Under your control.</h2>
+    <p class="sub">A side-panel agent that treats your machine as the place where the work happens, not a cloud account.</p>
+    <div class="grid g4">
+      <div class="card"><div class="ico" aria-hidden="true">🔒</div><h3>Private by default</h3><p>The model is yours. Point it at a local server and no page, screenshot or prompt leaves your machine.</p></div>
+      <div class="card"><div class="ico" aria-hidden="true">🧭</div><h3>Your real browser</h3><p>It works in your normal Chrome profile, not in a separate automated browser.</p></div>
+      <div class="card"><div class="ico" aria-hidden="true">✋</div><h3>You stay in control</h3><p>Per-site approvals, “ask before every action”, a plan-first mode, a visible Stop button and pause cards.</p></div>
+      <div class="card"><div class="ico" aria-hidden="true">🧩</div><h3>Local CAPTCHA help</h3><p>Opt-in and off by default. When it can't pass a check, it stops and hands the tab back to you.</p></div>
+    </div>
+
+    <h2 style="margin-top:64px">What it can do</h2>
+    <p class="sub">The same browser tools a cloud agent has, plus a few things that only make sense on your own PC.</p>
+    <div class="grid g3">
+      <div class="card"><div class="ico" aria-hidden="true">🖱️</div><h3>Browse and act</h3><p>Reads pages as a compact accessibility tree, clicks by ref or numbered screenshot mark, types, scrolls, handles tabs and dialogs.</p></div>
+      <div class="card"><div class="ico" aria-hidden="true">📝</div><h3>Fill forms</h3><p>React/Vue inputs, selects, checkboxes and web components. Saved values are never shown to the model; password fields are refused.</p></div>
+      <div class="card"><div class="ico" aria-hidden="true">📊</div><h3>Collect and export</h3><p>Extract repeating lists, read a site's own JSON responses, and write CSV, JSON or Markdown into allowlisted PC folders.</p></div>
+      <div class="card"><div class="ico" aria-hidden="true">🧪</div><h3>Test a website</h3><p><code>/test</code> crawls read-only for JS errors, broken links, unlabeled fields, phone layouts and slow pages, then writes a report.</p></div>
+      <div class="card"><div class="ico" aria-hidden="true">🎬</div><h3>Record</h3><p><code>/record …</code> saves a captioned GIF of the task, with a red circle on every click.</p></div>
+      <div class="card"><div class="ico" aria-hidden="true">⏰</div><h3>Schedule</h3><p>Run saved tasks daily, weekly or every N minutes, or watch a page and get notified when it changes.</p></div>
+      <div class="card"><div class="ico" aria-hidden="true">💼</div><h3>Job search</h3><p>Recipes for LinkedIn, BOSS直聘, 猎聘, 51job and 智联: collected, de-duplicated and saved as CSV.</p></div>
+      <div class="card"><div class="ico" aria-hidden="true">🤖</div><h3>Drive it from Claude Code</h3><p>An MCP server exposes the same tools to Claude Code, in one shared, unfocused window.</p></div>
+      <div class="card"><div class="ico" aria-hidden="true">🛡️</div><h3>CAPTCHA checks</h3><p>Turnstile, “verify you are human”, checkbox, slider and press-and-hold checks, solved locally when you turn it on.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="examples">
+  <div class="wrap">
+    <p class="kicker">Examples</p>
+    <h2>What a run looks like.</h2>
+    <p class="sub">Every GIF was recorded on a real website by LocalPilot itself. Click one to watch it full size.</p>
+    <div class="tabs" role="tablist" aria-label="Example type">
+      <button class="tab" role="tab" aria-selected="true" data-filter="all">All</button>
+      <button class="tab" role="tab" aria-selected="false" data-filter="ai">AI agent</button>
+      <button class="tab" role="tab" aria-selected="false" data-filter="test">Website tests</button>
+      <button class="tab" role="tab" aria-selected="false" data-filter="real">Recordings</button>
+    </div>
+    <div class="grid g3" id="ex-grid">
+<!--VIDEO-CARD
+      <button class="ex" data-kind="ai" data-video="media/hero.mp4" data-caption="LocalPilot in under a minute.">
+        <div class="thumb"><video src="media/hero.mp4" poster="media/hero.jpg" muted loop playsinline preload="metadata" aria-hidden="true"></video></div>
+        <div class="body"><span class="tag">Video</span><h3>LocalPilot in under a minute</h3><p>The product tour.</p></div>
+      </button>
+-->
+      <button class="ex" data-kind="ai" data-src="examples/demo-ai/books.gif" data-caption="“Find the cheapest book in the Travel category.” Answer: £23.21, correct. 4 tool calls, 20 s.">
+        <div class="thumb"><img src="examples/demo-ai/books.gif" alt="AI reads the Travel category prices" loading="lazy"></div>
+        <div class="body"><span class="tag">AI agent</span><h3>“Find the cheapest Travel book.”</h3><p>Answered £23.21, the lowest of 11 prices. 4 tool calls, 20 s.</p></div>
+      </button>
+      <button class="ex" data-kind="ai" data-src="examples/demo-ai/form.gif" data-caption="“Fill this pizza order form for Jane Doe … Do NOT submit.” 8 tool calls, 21 s.">
+        <div class="thumb"><img src="examples/demo-ai/form.gif" alt="AI fills a pizza order form and stops before submitting" loading="lazy"></div>
+        <div class="body"><span class="tag">AI agent</span><h3>“Fill this form, but don't submit.”</h3><p>Filled every field, ticked the toppings, then stopped for review.</p></div>
+      </button>
+      <button class="ex" data-kind="ai" data-src="examples/demo-ai/wikipedia.gif" data-caption="“Who created the first web browser, and when?” Tim Berners-Lee, 1990. 10 tool calls, 52 s.">
+        <div class="thumb"><img src="examples/demo-ai/wikipedia.gif" alt="AI searches Wikipedia for the first web browser" loading="lazy"></div>
+        <div class="body"><span class="tag">AI agent</span><h3>“Who made the first web browser?”</h3><p>Searched Wikipedia: WorldWideWeb, Tim Berners-Lee, 1990.</p></div>
+      </button>
+      <button class="ex" data-kind="ai" data-src="examples/demo-ai/bugs.gif" data-caption="“Test this website for bugs and explain the important problems.” 1 tool call, 37 s.">
+        <div class="thumb"><img src="examples/demo-ai/bugs.gif" alt="AI runs the testing mode on a page with broken images" loading="lazy"></div>
+        <div class="body"><span class="tag">AI agent</span><h3>“Test this site and explain the bugs.”</h3><p>Two 404 images, a failing request, missing alt text, each with a fix.</p></div>
+      </button>
+      <button class="ex" data-kind="test" data-src="examples/real/w3c-test.gif" data-caption="W3C's deliberately inaccessible demo site: 6 errors, 128 warnings.">
+        <div class="thumb"><img src="examples/real/w3c-report.png" alt="Report for the W3C inaccessible demo site" loading="lazy"></div>
+        <div class="body"><span class="tag">/test</span><h3>W3C's “inaccessible” demo</h3><p>103 images without alt text, unlabeled fields, no viewport tag.</p></div>
+      </button>
+      <button class="ex" data-kind="test" data-src="examples/demo/buggy-shop-test.gif" data-caption="A demo shop with one of each bug planted: 9 errors and 4 warnings, all found.">
+        <div class="thumb"><img src="examples/demo/buggy-shop-report.png" alt="Report for the demo shop with planted bugs" loading="lazy"></div>
+        <div class="body"><span class="tag">/test</span><h3>A shop with bugs on purpose</h3><p>“Price: undefined”, €NaN, a 503 API, a script crash: all found.</p></div>
+      </button>
+      <button class="ex" data-kind="test" data-src="examples/real/the-internet-test.gif" data-caption="the-internet.herokuapp.com: two broken images, each reported with the failed request behind it.">
+        <div class="thumb"><img src="examples/real/the-internet-report.png" alt="Report for the broken images page" loading="lazy"></div>
+        <div class="body"><span class="tag">/test</span><h3>Broken images page</h3><p>Each 404 reported twice: the image, and the request behind it.</p></div>
+      </button>
+      <button class="ex" data-kind="test" data-src="examples/real/books-test.gif" data-caption="books.toscrape.com: jQuery loaded over http on an https page, blocked by Chrome.">
+        <div class="thumb"><img src="examples/real/books-report.png" alt="Report for books.toscrape.com" loading="lazy"></div>
+        <div class="body"><span class="tag">/test</span><h3>books.toscrape.com</h3><p>Found mixed content on every page: jQuery over plain http.</p></div>
+      </button>
+      <button class="ex" data-kind="real" data-src="examples/real/wikipedia-search.gif" data-caption="Search Wikipedia, open the article, jump to a section.">
+        <div class="thumb"><img src="examples/real/wikipedia-search.gif" alt="Searching Wikipedia and jumping to the History section" loading="lazy"></div>
+        <div class="body"><span class="tag">/record</span><h3>Search Wikipedia</h3><p>Type, open, jump to History, with a caption on every frame.</p></div>
+      </button>
+      <button class="ex" data-kind="real" data-src="examples/real/pizza-form.gif" data-caption="Fill httpbin's pizza form: name, phone, email, size, toppings, instructions.">
+        <div class="thumb"><img src="examples/real/pizza-form.gif" alt="Filling a pizza order form" loading="lazy"></div>
+        <div class="body"><span class="tag">/record</span><h3>Fill a form</h3><p>Every field and checkbox, with a red circle where each click landed.</p></div>
+      </button>
+      <button class="ex" data-kind="real" data-src="examples/real/quotes-pages.gif" data-caption="extract_list followed “Next” over three pages and saved 30 rows to quotes.csv.">
+        <div class="thumb"><img src="examples/real/quotes-pages.gif" alt="Reading three pages of quotes" loading="lazy"></div>
+        <div class="body"><span class="tag">Extract</span><h3>Three pages → spreadsheet</h3><p>Followed “Next” and saved 30 quotes with authors and tags as CSV.</p></div>
+      </button>
+      <button class="ex" data-kind="real" data-src="examples/real/books-browse.gif" data-caption="Open the Travel category on books.toscrape.com, then a book.">
+        <div class="thumb"><img src="examples/real/books-browse.gif" alt="Browsing a shop category and product" loading="lazy"></div>
+        <div class="body"><span class="tag">/record</span><h3>Browse a shop</h3><p>Category, then product page, step by step.</p></div>
+      </button>
+    </div>
+  </div>
+</section>
+
+<section class="block alt" id="captcha">
+  <div class="wrap">
+    <p class="kicker">CAPTCHA checks</p>
+    <h2>Gets past simple checks, then hands back the hard ones.</h2>
+    <p class="sub">With the opt-in solver turned on, LocalPilot clicks checks the way a person would, in your own browser. When it can't pass one (image grids, FunCaptcha), it pauses and tells you.</p>
+    <div class="shots">
+      <figure><img src="docs/img/turnstile-success.jpg" alt="Cloudflare Turnstile passed" loading="lazy"><figcaption>Cloudflare Turnstile</figcaption></figure>
+      <figure><img src="docs/img/virtualmanager-passed.jpg" alt="Login page loaded after a Cloudflare interstitial" loading="lazy"><figcaption>Cloudflare interstitial</figcaption></figure>
+      <figure><img src="docs/img/hobbit-passed.jpg" alt="Custom “I am not a robot!” check passed" loading="lazy"><figcaption>“I am not a robot!” button</figcaption></figure>
+      <figure><img src="docs/img/antibot-no-robots.jpg" alt="Brotector check: No robots found" loading="lazy"><figcaption>Brotector CAPTCHA</figcaption></figure>
+    </div>
+    <p class="note">Off by default. Only use it on sites you're allowed to automate. <a href="https://github.com/fawad1997/LocalPilot/blob/main/docs/CAPTCHA.md">See what was tested →</a></p>
+  </div>
+</section>
+
+<section class="block" id="mcp">
+  <div class="wrap mcp">
+    <div>
+      <p class="kicker">Claude Code · MCP</p>
+      <h2>Let Claude Code drive your real browser.</h2>
+      <p class="sub" style="margin-bottom:0">LocalPilot ships an MCP server. Claude Code gets the same browser tools (navigate, click, read, forms, captures, recipes), and every session works in one shared, unfocused “LocalPilot MCP” window, so it never takes over the tabs you're using.</p>
+      <div class="flow" aria-label="How the bridge connects"><span>Claude Code</span>⇄<span>mcp-server.mjs</span>⇄<span>native host</span>⇄<span>extension</span>⇄<span>Chrome</span></div>
+    </div>
+    <div>
+      <div class="code"><button class="copy" type="button">Copy</button>npm run host:install
+claude mcp add localpilot -s local -- node "&lt;project folder&gt;/host/mcp-server.mjs"</div>
+      <p class="caption">Then just ask: “Use localpilot to test http://localhost:3000 for bugs.”</p>
+    </div>
+  </div>
+</section>
+
+<section class="block alt" id="install">
+  <div class="wrap">
+    <p class="kicker">Install</p>
+    <h2>Running in three steps.</h2>
+    <p class="sub">No store listing, no sign-up. Load the folder, point it at a model, and ask.</p>
+    <div class="steps">
+      <div class="card step">
+        <h3>Load the extension</h3>
+        <ol><li>Download or clone the repo.</li><li>Open <code>chrome://extensions</code> and turn on <b>Developer mode</b>.</li><li>Click <b>Load unpacked</b> and pick the folder.</li><li>Press <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> to open the panel.</li></ol>
+        <div class="code"><button class="copy" type="button">Copy</button>git clone https://github.com/fawad1997/LocalPilot</div>
+      </div>
+      <div class="card step">
+        <h3>Connect a model</h3>
+        <ol><li>Pull a vision model with Ollama.</li><li>Allow the extension to call it (Windows, once).</li><li>In the panel: gear → Preset “Ollama” → Test → Save.</li></ol>
+        <div class="code"><button class="copy" type="button">Copy</button>ollama pull qwen2.5vl:7b
+setx OLLAMA_ORIGINS "chrome-extension://*"</div>
+      </div>
+      <div class="card step">
+        <h3>Give it a task</h3>
+        <ol><li>Open any site and the side panel.</li><li>Type what you want done.</li><li>Approve the site once, or always.</li></ol>
+        <div class="code">Summarize this page in three bullet points.</div>
+      </div>
+    </div>
+    <p class="caption" style="margin-top:20px">LM Studio, llama.cpp, vLLM, LiteLLM and any OpenAI/Anthropic-compatible server work the same way. <a href="https://github.com/fawad1997/LocalPilot/blob/main/docs/REFERENCE.md#local-servers">Full setup guide →</a></p>
+  </div>
+</section>
+
+<section class="block" id="compare">
+  <div class="wrap">
+    <p class="kicker">How it compares</p>
+    <h2>Same building blocks, different choices.</h2>
+    <p class="sub">The interaction layer is no longer the difference. Where the model runs, what the product may do, and what it costs are.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th scope="col"></th><th scope="col">LocalPilot</th><th scope="col">Claude in Chrome</th><th scope="col">Browser Use</th></tr></thead>
+        <tbody>
+          <tr><td>Where the model runs</td><td class="us">Your server: a local LLM or your own endpoint</td><td>Anthropic cloud</td><td>Any LLM you configure</td></tr>
+          <tr><td>Account needed</td><td class="us">None</td><td>Paid Claude plan</td><td>None for the library; an API key</td></tr>
+          <tr><td>Browser it drives</td><td class="us">Your normal Chrome</td><td>Your normal Chrome</td><td>A local profile or a cloud browser</td></tr>
+          <tr><td>Human control</td><td class="us">Site approvals, ask-every-action, plan mode, Stop</td><td>Approval modes, safety classifiers</td><td>Whatever you code</td></tr>
+          <tr><td>CAPTCHA handling</td><td class="us">Built-in, local, opt-in</td><td>Prohibited</td><td>Cloud browsers only</td></tr>
+          <tr><td>Cost</td><td class="us">Free; you bring the model</td><td>Subscription</td><td>Free library; cloud is paid</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="caption">A snapshot from public documentation on 27 October 2026. <a href="https://github.com/fawad1997/LocalPilot/blob/main/docs/COMPARISON.md">Full comparison →</a></p>
+  </div>
+</section>
+
+<section class="final">
+  <div class="wrap">
+    <h2>Your browser. <em style="font-style:normal;background:linear-gradient(135deg,var(--accent),var(--accent-2));-webkit-background-clip:text;background-clip:text;color:transparent">Your model.</em></h2>
+    <p class="sub" style="margin:0 auto">Free and open source under the MIT license.</p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="#install">Install LocalPilot</a>
+      <a class="btn btn-ghost" href="https://github.com/fawad1997/LocalPilot">Star on GitHub</a>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span class="grow">LocalPilot 0.10.0 · MIT license</span>
+    <a href="https://github.com/fawad1997/LocalPilot/blob/main/docs/REFERENCE.md">Reference</a>
+    <a href="https://github.com/fawad1997/LocalPilot/blob/main/docs/PRIVACY.md">Privacy</a>
+    <a href="https://github.com/fawad1997/LocalPilot/blob/main/examples/README.md">All examples</a>
+    <a href="https://github.com/fawad1997/LocalPilot">GitHub</a>
+  </div>
+</footer>
+
+<dialog class="lb" id="lb" aria-label="Example">
+  <button type="button" id="lb-close" aria-label="Close">×</button>
+  <div id="lb-media"></div>
+  <p id="lb-cap"></p>
+</dialog>
+
+<script>
+(() => {
+  const root = document.documentElement;
+  try { const t = localStorage.getItem('lp-theme'); if (t) root.dataset.theme = t; } catch {}
+  document.getElementById('theme').addEventListener('click', () => {
+    const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    root.dataset.theme = dark ? 'light' : 'dark';
+    try { localStorage.setItem('lp-theme', root.dataset.theme); } catch {}
+  });
+
+  for (const btn of document.querySelectorAll('.copy')) {
+    btn.addEventListener('click', async () => {
+      const text = btn.parentElement.textContent.replace(btn.textContent, '').trim();
+      try { await navigator.clipboard.writeText(text); btn.textContent = 'Copied'; } catch { btn.textContent = 'Select & copy'; }
+      setTimeout(() => { btn.textContent = 'Copy'; }, 1600);
+    });
+  }
+
+  const tabs = document.querySelectorAll('.tab');
+  for (const tab of tabs) {
+    tab.addEventListener('click', () => {
+      for (const t of tabs) t.setAttribute('aria-selected', String(t === tab));
+      const f = tab.dataset.filter;
+      for (const card of document.querySelectorAll('.ex')) card.hidden = f !== 'all' && card.dataset.kind !== f;
+    });
+  }
+
+  const lb = document.getElementById('lb');
+  const media = document.getElementById('lb-media');
+  for (const card of document.querySelectorAll('.ex')) {
+    card.addEventListener('click', () => {
+      media.innerHTML = '';
+      let el;
+      if (card.dataset.video) {
+        el = document.createElement('video');
+        Object.assign(el, { src: card.dataset.video, controls: true, autoplay: true, playsInline: true });
+      } else {
+        el = document.createElement('img');
+        el.src = card.dataset.src;
+        el.alt = card.querySelector('img')?.alt || '';
+      }
+      media.append(el);
+      document.getElementById('lb-cap').textContent = card.dataset.caption || '';
+      lb.showModal();
+    });
+  }
+  const close = () => { lb.close(); media.innerHTML = ''; };
+  document.getElementById('lb-close').addEventListener('click', close);
+  lb.addEventListener('click', (e) => { if (e.target === lb) close(); });
+
+  const video = document.getElementById('hero-video');
+  const sound = document.getElementById('sound');
+  if (video && sound) {
+    sound.addEventListener('click', () => {
+      video.muted = !video.muted;
+      if (!video.muted) video.play();
+      sound.textContent = video.muted ? '🔊 Tap for sound' : '🔇 Mute';
+    });
+  }
+})();
+</script>
+</body>
+</html>

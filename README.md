@@ -1,6 +1,6 @@
 # LocalPilot
 
-**A browser agent in Chrome's side panel, powered by a local AI model.**
+**[Website](https://fawad1997.github.io/LocalPilot/)** · **A browser agent in Chrome's side panel, powered by a local AI model.**
 
 LocalPilot opens pages, reads them, clicks, types, fills forms, saves data to your PC and takes screenshots — while you watch in a side panel and approve what it does. The model runs **on your computer** (Ollama, LM Studio, llama.cpp, vLLM, LiteLLM, FreeLLMAPI, or any OpenAI/Anthropic-compatible server), so pages and chats do not go to a cloud account. There is no account, no subscription and no telemetry.
 
