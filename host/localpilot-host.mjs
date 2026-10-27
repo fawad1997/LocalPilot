@@ -330,9 +330,11 @@ function startRelay(sendToExtension) {
   const token = crypto.randomBytes(24).toString('hex');
   const calls = new Map(); // callId -> { socket, id, timer }
   let seq = 0;
+  let sessions = 0;
 
   const server = net.createServer((socket) => {
     let authed = false;
+    let session = null; // one per MCP client (Claude Code session): its own tab in the browser
     let buf = '';
     socket.setEncoding('utf8');
     socket.on('data', (chunk) => {
@@ -352,6 +354,7 @@ function startRelay(sendToExtension) {
           authed = msg.type === 'auth' && given.length === token.length && crypto.timingSafeEqual(given, Buffer.from(token));
           socket.write(`${JSON.stringify({ type: 'auth', ok: authed })}\n`);
           if (!authed) socket.end();
+          else session = /^[\w-]{1,64}$/.test(String(msg.session || '')) ? msg.session : `s${(sessions += 1)}`;
           continue;
         }
         if (msg.op === 'cancel') {
@@ -371,10 +374,21 @@ function startRelay(sendToExtension) {
           socket.write(`${JSON.stringify({ id: msg.id, ok: false, error: 'LocalPilot extension did not answer in time.' })}\n`);
         }, 10 * 60 * 1000);
         calls.set(callId, { socket, id: msg.id, timer });
-        sendToExtension({ type: 'mcp', callId, op: msg.op, name: msg.name, arguments: msg.arguments || {} });
+        sendToExtension({ type: 'mcp', callId, session, op: msg.op, name: msg.name, arguments: msg.arguments || {} });
       }
     });
     socket.on('error', () => {});
+    socket.on('close', () => {
+      if (!authed) return;
+      // The client is gone: stop its unfinished calls and free its tab.
+      for (const [callId, c] of calls) {
+        if (c.socket !== socket) continue;
+        calls.delete(callId);
+        clearTimeout(c.timer);
+        sendToExtension({ type: 'mcp_cancel', callId });
+      }
+      sendToExtension({ type: 'mcp_session_end', session });
+    });
   });
 
   server.on('error', (err) => {

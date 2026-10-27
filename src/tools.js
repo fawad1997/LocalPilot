@@ -517,7 +517,7 @@ async function screenshot(ctx, opts = {}) {
   await setIndicator(tabId, false);
   let marks = null;
   try {
-    const metrics = await cdp.send(tabId, 'Page.getLayoutMetrics');
+    const metrics = await cdp.send(tabId, 'Page.getLayoutMetrics', {}, { timeoutMs: SHOT_TIMEOUT_MS }).catch((err) => noShot(tabId, err));
     const vp = metrics.cssVisualViewport || metrics.layoutViewport;
     const cssW = vp.clientWidth;
     const cssH = vp.clientHeight;
@@ -535,7 +535,7 @@ async function screenshot(ctx, opts = {}) {
     } else if (opts.marks) {
       marks = await callPage(tabId, 'drawMarks').catch(() => null);
     }
-    const shot = await cdp.send(tabId, 'Page.captureScreenshot', params);
+    const shot = await cdp.send(tabId, 'Page.captureScreenshot', params, { timeoutMs: SHOT_TIMEOUT_MS }).catch((err) => noShot(tabId, err));
     const resized = await resizeJpeg(shot.data, targetW);
     if (!opts.clip && !opts.fullPage && !opts.record) {
       ctx.screenshotScale = { x: cssW / resized.width, y: cssH / resized.height };
@@ -546,6 +546,16 @@ async function screenshot(ctx, opts = {}) {
     if (marks) await callPage(tabId, 'clearMarks').catch(() => {});
     if (ctx.running) await setIndicator(tabId, true);
   }
+}
+
+// Chrome only draws the front tab of each window: a capture of another tab can wait forever.
+const SHOT_TIMEOUT_MS = 20000;
+
+async function noShot(tabId, err) {
+  if (DETACHED.test(String(err.message))) throw err; // a dropped debugger: runAndReconnect retries on this message
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (tab && !tab.active) throw new Error(`No screenshot: this tab is in the background of its window, and Chrome only draws the front tab (${err.message}). Use read_page or find, or switch_tab to it first.`);
+  throw err;
 }
 
 async function resizeJpeg(base64, targetWidth) {
@@ -950,7 +960,12 @@ async function runAndReconnect(ctx, name, input) {
   }
 }
 
-export async function runTool(ctx, rawName, rawInput = {}) {
+// Tool calls that share a window with other agents (ctx.exclusive, see mcpwindow.js) take turns.
+export function runTool(ctx, rawName, rawInput = {}) {
+  return ctx.exclusive ? ctx.exclusive(() => runToolNow(ctx, rawName, rawInput)) : runToolNow(ctx, rawName, rawInput);
+}
+
+async function runToolNow(ctx, rawName, rawInput) {
   const { name, input: asked } = normalizeToolCall(rawName, rawInput);
   await checkAllowedSites(ctx, name, asked);
   cdp.setStealth(ctx.tabId, ctx.settings.captchaSolver === true);
@@ -1052,6 +1067,7 @@ async function runToolInner(ctx, name, input) {
     case 'tabs_close': {
       const id = Number(input.tab_id);
       if (id === ctx.tabId) throw new Error('That is the tab you are controlling. switch_tab to another tab first.');
+      if ((await ctx.busyTabs?.())?.has(id)) throw new Error(otherSessionText(id));
       const tab = await chrome.tabs.get(id);
       await chrome.tabs.remove(id);
       return [text(`Closed tab ${id}: ${tab.title || tab.url}`)];
@@ -1066,6 +1082,7 @@ async function runToolInner(ctx, name, input) {
     }
     case 'switch_tab': {
       const tab = await chrome.tabs.get(Number(input.tab_id));
+      if ((await ctx.busyTabs?.())?.has(tab.id)) throw new Error(otherSessionText(tab.id));
       await chrome.tabs.update(tab.id, { active: true });
       await switchTo(ctx, tab.id);
       return [text(`Now controlling tab ${tab.id}: ${tab.title} (${tab.url})`)];
@@ -1288,6 +1305,8 @@ async function gifRecorder(ctx, input) {
   }
 }
 
+export const otherSessionText = (tabId) => `Tab ${tabId} belongs to another Claude Code session. Work in your own tab (tabs_create opens a new one).`;
+
 async function switchTo(ctx, tabId) {
   await setIndicator(ctx.tabId, false);
   ctx.tabId = tabId;
@@ -1473,7 +1492,8 @@ async function dialogNote(tabId) {
 async function tabsContext(ctx, input = {}) {
   const current = await tabInfo(ctx.tabId);
   const tabs = await chrome.tabs.query(input.all_windows ? {} : { windowId: current.windowId });
-  const lines = tabs.map((t) => `${t.id === ctx.tabId ? '* ' : '  '}${t.id}: ${t.title || '(untitled)'} — ${t.url}${input.all_windows ? ` [window ${t.windowId}]` : ''}`);
+  const busy = (await ctx.busyTabs?.()) || new Set();
+  const lines = tabs.map((t) => `${t.id === ctx.tabId ? '* ' : '  '}${t.id}: ${t.title || '(untitled)'} — ${t.url}${input.all_windows ? ` [window ${t.windowId}]` : ''}${busy.has(t.id) ? ' (another Claude Code session; do not use)' : ''}`);
   return [text(`Tabs in ${input.all_windows ? 'all windows' : 'this window'} (* = controlled):\n${lines.join('\n')}`)];
 }
 

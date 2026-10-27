@@ -55,8 +55,25 @@ function probeInPage(providerSources) {
     }
   }
   const title = document.title || '';
-  const body = (document.body?.innerText || '').slice(0, 3000);
-  const short = body.length < 1500;
+  const all = document.body?.innerText || '';
+  const body = all.slice(0, 3000);
+  // Challenge pages are small. A long page that only mentions the words (an article, a README,
+  // LocalPilot's own site) is not one, unless they sit in a popup over the page.
+  const short = all.length < 1500;
+  const small = all.length < 4000;
+  const inPopup = (re) => {
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(), n = 0; node && n < 20000; node = walker.nextNode(), n += 1) {
+      if (!re.test(node.data)) continue;
+      for (let el = node.parentElement; el && el !== document.body; el = el.parentElement) {
+        if (el.matches('dialog[open], [role="dialog"], [role="alertdialog"], [aria-modal="true"]') || getComputedStyle(el).position === 'fixed') {
+          if (visible(node.parentElement)) return true;
+          break;
+        }
+      }
+    }
+    return false;
+  };
   const texts = [
     [/Just a moment\.\.\.|Attention Required! \| Cloudflare|Checking your browser|Checking if the site connection is secure/i, 'cloudflare-challenge', true],
     [/Verify you are human|I'm not a robot|confirm you are not a robot|Are you a robot\?/i, 'human-verification', true],
@@ -67,7 +84,7 @@ function probeInPage(providerSources) {
     [/Access denied|Request blocked|You have been blocked|Too Many Requests/i, 'blocked', false],
   ];
   for (const [re, k, strong] of texts) {
-    if (re.test(title) || (re.test(body) && (strong ? body.length < 4000 : short))) {
+    if (re.test(title) || (re.test(body) && (strong ? small : short)) || (strong && !small && re.test(all) && inPopup(re))) {
       kind ??= k;
       signals.push(`text:${k}`);
     }

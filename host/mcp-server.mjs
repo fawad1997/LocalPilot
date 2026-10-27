@@ -4,15 +4,19 @@
 // It forwards tool calls over a local pipe to the LocalPilot native host, which
 // relays them to the extension running in your browser. Chrome must be open
 // with LocalPilot installed and the PC bridge set up (node host/install.mjs).
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import readline from 'node:readline';
 import { stateDir } from './localpilot-host.mjs';
 
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 const SUPPORTED_PROTOCOLS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const CACHE = path.join(stateDir(), 'mcp-tools-cache.json');
+// One per MCP client (each Claude Code session starts its own server): the browser gives every
+// session its own tab, kept across reconnects.
+const SESSION = crypto.randomUUID();
 
 const STATUS_TOOL = {
   name: 'localpilot_status',
@@ -22,7 +26,7 @@ const STATUS_TOOL = {
 
 const INSTRUCTIONS = [
   'LocalPilot drives the user\'s real browser (their logins and cookies) through the LocalPilot extension.',
-  'Calls run in a dedicated, unfocused "LocalPilot MCP" browser window (its own tab group). Start with navigate, tabs_context or tabs_create; every tool takes an optional tab_id.',
+  'Calls run in a dedicated, unfocused "LocalPilot MCP" browser window (its own tab group). This session has its own tab there; other Claude Code sessions have theirs, marked in tabs_context and off limits. Start with navigate, tabs_context or tabs_create; every tool takes an optional tab_id.',
   'Screenshots carry numbered marks: click with {"action":"left_click","mark":N}. Refs inside iframes look like f3:ref_7.',
   'confirm()/prompt() dialogs stay open until you call handle_dialog. file_upload attaches files from the jobs folder; downloads_wait saves downloads into it.',
   'Prefer read_page/find refs over screenshot coordinates. Use capture_start + capture_read to read a site\'s own JSON API responses.',
@@ -66,7 +70,7 @@ function connectPipe() {
       reject(err);
     };
     s.setEncoding('utf8');
-    s.on('connect', () => s.write(`${JSON.stringify({ type: 'auth', token: bridge.token })}\n`));
+    s.on('connect', () => s.write(`${JSON.stringify({ type: 'auth', token: bridge.token, session: SESSION })}\n`));
     s.on('data', (chunk) => {
       buf += chunk;
       let nl;

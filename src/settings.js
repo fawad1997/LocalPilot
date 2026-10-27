@@ -46,9 +46,6 @@ export const DEFAULTS = {
   // host/mcp-server.mjs. The client's own tool-permission prompts gate each call.
   mcpBridge: true,
   mcpPermissionMode: 'auto',
-  // Where MCP calls and scheduled runs open tabs: 'dedicated' = the shared unfocused
-  // "LocalPilot MCP" window; 'current' = the window you last used (as background tabs).
-  mcpWindowMode: 'dedicated',
   approvedDomains: [],
   extraSystemPrompt: '',
   // Quantara (D:\AI\Trading): read the local trading bot's dashboard. quantaraToken (its

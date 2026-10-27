@@ -108,6 +108,19 @@ const WIDGET_PAGE = `<!doctype html><html><head><title>Contact</title></head><bo
 <div class="g-recaptcha" role="checkbox" aria-label="I'm not a robot" style="width:300px;height:78px;border:1px solid #888">I'm not a robot</div>
 </main></body></html>`;
 
+// Pages that only talk about bot checks are not one (a guide, a README, LocalPilot's own site):
+// /mentions is long and quotes the words in its text (and in a hidden popup). The same words in a
+// popup over the page (/mentions-popup) or on a short page (/short-check) are a check.
+const ARTICLE = Array.from({ length: 40 }, (_, i) => `<p>Paragraph ${i + 1}: browser agents meet many kinds of pages, forms, tables and menus, and read each one as text before acting.</p>`).join('');
+const mentionsPage = (popup) => `<!doctype html><html><head><title>CAPTCHA guide</title></head><body><main>
+<h1>How CAPTCHA checks work</h1>
+<p>Sites ask you to "Verify you are human" or to tick "I'm not a robot" before they let you in.</p>
+${ARTICLE}
+<div style="position:fixed;bottom:0;display:none">Verify you are human</div>
+</main>${popup ? '<div role="dialog" style="position:fixed;top:20%;left:30%;width:300px;background:#fff;border:1px solid #888;padding:20px">Verify you are human <button>Continue</button></div>' : ''}</body></html>`;
+const SHORT_CHECK_PAGE = `<!doctype html><html><head><title>Security</title></head><body><main>
+<p>Please verify you are human to continue.</p><button>Continue</button></main></body></html>`;
+
 // A Cloudflare-Turnstile-shaped fixture: the checkbox lives in a cross-origin iframe, and the
 // check only passes when that checkbox is really clicked (then a response token is set and the
 // challenge page is replaced). Used by tests/e2e-captcha.mjs.
@@ -593,6 +606,14 @@ export function startMockServer(port = 11999) {
     }
     if (url.pathname === '/long') {
       res.writeHead(200, { 'content-type': 'text/html' }).end(`<!doctype html><html><head><title>Long</title></head><body style="margin:0">${Array.from({ length: 30 }, (_, i) => `<section style="height:100px;border-bottom:1px solid #ccc">Section ${i + 1}</section>`).join('')}</body></html>`);
+      return;
+    }
+    if (url.pathname === '/mentions' || url.pathname === '/mentions-popup') {
+      res.writeHead(200, { 'content-type': 'text/html' }).end(mentionsPage(url.pathname === '/mentions-popup'));
+      return;
+    }
+    if (url.pathname === '/short-check') {
+      res.writeHead(200, { 'content-type': 'text/html' }).end(SHORT_CHECK_PAGE);
       return;
     }
     if (url.pathname === '/confirm') {

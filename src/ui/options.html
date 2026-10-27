@@ -99,12 +99,6 @@
       <p class="hint">Solving works by clicking the real checkbox with human-like mouse input, and by loading pages with the debugger disconnected. Image grids and Arkose FunCaptcha still need you. Only use it on sites you may automate.</p>
       <label class="check"><input id="logging" type="checkbox" /> Write diagnostic logs to the extension's logs folder (needs the PC bridge)</label>
       <label class="check"><input id="mcpBridge" type="checkbox" /> Let Claude Code / MCP clients drive this browser (needs the PC bridge; reload the extension after changing)</label>
-      <label>Where MCP calls and scheduled runs open tabs
-        <select id="mcpWindowMode">
-          <option value="dedicated">Shared "LocalPilot MCP" window (unfocused, reused)</option>
-          <option value="current">My current window (as background tabs)</option>
-        </select>
-      </label>
       <label class="check"><input id="allowJavascriptTool" type="checkbox" /> Enable the javascript_tool (runs model-written code in pages)</label>
       <label>Extra instructions
         <textarea id="extraSystemPrompt" rows="4" placeholder="Added to the system prompt"></textarea>

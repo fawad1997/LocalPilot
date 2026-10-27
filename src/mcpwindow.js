@@ -1,8 +1,7 @@
-// Where MCP calls and scheduled runs open their tabs. By default one dedicated, unfocused
-// "LocalPilot MCP" window is reused: its id is kept in session storage (the MV3 service
-// worker forgets memory when it idles) and, failing that, found again by its tab group.
-// With mcpWindowMode 'current' the tabs open in the window you last used instead.
-import { loadSettings } from './settings.js';
+// Where MCP calls and scheduled runs open their tabs: one dedicated, unfocused "LocalPilot MCP"
+// window, reused. Its id is kept in session storage (the MV3 service worker forgets memory when
+// it idles) and, failing that, found again by its tab group. Not your own window: Chrome only
+// draws the front tab of a window, so an agent's tab behind yours could not be seen or captured.
 import { log } from './logger.js';
 
 export const GROUP_TITLE = 'LocalPilot MCP';
@@ -37,17 +36,8 @@ async function dedicatedWindow() {
   return win;
 }
 
-async function targetWindow() {
-  const settings = await loadSettings();
-  if (settings.mcpWindowMode === 'current') {
-    const win = await chrome.windows.getLastFocused({ populate: true, windowTypes: ['normal'] }).catch(() => null);
-    if (win) return Object.assign(win, { current: true });
-  }
-  return dedicatedWindow();
-}
-
 export function mcpWindow() {
-  const run = (pending || Promise.resolve()).catch(() => {}).then(targetWindow);
+  const run = (pending || Promise.resolve()).catch(() => {}).then(dedicatedWindow);
   pending = run;
   return run;
 }
@@ -64,10 +54,9 @@ export async function addToGroup(tabId) {
 }
 
 // A tab for a new session or run. A freshly created dedicated window donates its first tab;
-// otherwise an idle tab already in the group is reused, else a new one is opened.
-export async function openMcpTab({ url = 'about:blank', reuseIdle = false, group = true } = {}) {
+// otherwise an idle tab already in the group (not one in `exclude`) is reused, else a new one is opened.
+export async function openMcpTab({ url = 'about:blank', reuseIdle = false, exclude = new Set(), group = true } = {}) {
   const win = await mcpWindow();
-  const active = !win.current; // your own window keeps the tab you are looking at
   let tab;
   if (win.fresh) {
     tab = win.tabs[0];
@@ -75,11 +64,41 @@ export async function openMcpTab({ url = 'about:blank', reuseIdle = false, group
   } else {
     if (reuseIdle) {
       const groups = await chrome.tabGroups.query({ title: GROUP_TITLE, windowId: win.id }).catch(() => []);
-      const idle = groups[0] ? (await chrome.tabs.query({ windowId: win.id, groupId: groups[0].id }))[0] : null;
-      if (idle) tab = await chrome.tabs.update(idle.id, { url, ...(active ? { active: true } : {}) });
+      const idle = groups[0] ? (await chrome.tabs.query({ windowId: win.id, groupId: groups[0].id })).find((t) => !exclude.has(t.id)) : null;
+      if (idle) tab = await chrome.tabs.update(idle.id, { url, active: true });
     }
-    tab ||= await chrome.tabs.create({ windowId: win.id, url, active });
+    tab ||= await chrome.tabs.create({ windowId: win.id, url, active: true });
   }
   if (group) await addToGroup(tab.id);
   return { tabId: tab.id, windowId: win.id, windowCreated: !!win.fresh };
+}
+
+// Chrome only draws the front tab of a window; screenshots of its other tabs hang or fail.
+// Everything that shares the LocalPilot MCP window (MCP sessions, scheduled runs) takes turns,
+// and each turn first brings its tab to the front. Tabs in your own windows are never switched
+// (a tab_id call there captures what Chrome draws, or fails with a clear message).
+const TURN_MAX_MS = 10 * 60 * 1000; // a stuck call must not block everyone for good
+let turn = Promise.resolve();
+
+// `cancelled` (optional promise): the caller gave up, so the turn passes on at once (the tool
+// may still be finishing) and a call still waiting for its turn never starts.
+export function withFrontTab(ctx, fn, cancelled = null) {
+  let gaveUp = false;
+  cancelled?.then(() => {
+    gaveUp = true;
+  });
+  const run = turn.then(async () => {
+    if (gaveUp) throw new Error('Cancelled by the client.');
+    await bringToFront(ctx.tabId);
+    return fn();
+  });
+  turn = Promise.race([run.catch(() => {}), new Promise((r) => setTimeout(r, TURN_MAX_MS)), ...(cancelled ? [cancelled] : [])]);
+  return run;
+}
+
+async function bringToFront(tabId) {
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (!tab || tab.active) return;
+  const own = (await chrome.storage.session.get(KEY).catch(() => ({})))[KEY];
+  if (tab.windowId === own) await chrome.tabs.update(tabId, { active: true }).catch(() => {});
 }

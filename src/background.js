@@ -9,7 +9,7 @@ import { runTool, callPage } from './tools.js';
 import { detectBotCheck } from './botcheck.js';
 import { detach as cdpDetach, isAttached as cdpIsAttached, retain as cdpRetain } from './cdp.js';
 import * as tasks from './tasks.js';
-import { openMcpTab } from './mcpwindow.js';
+import { openMcpTab, withFrontTab } from './mcpwindow.js';
 import { resolveApplication, pendingApplications } from './recipes/apply.js';
 
 const testCtx = new Map();
@@ -129,7 +129,7 @@ function cleanAttachments(list, existing = new Map()) {
   return out;
 }
 
-async function startRun({ conv, tabId, prompt, emit, requestApproval, settingsPatch, panelTabId, files = [], task = null, extra = '' }) {
+async function startRun({ conv, tabId, prompt, emit, requestApproval, settingsPatch, panelTabId, files = [], task = null, extra = '', frontTab = false }) {
   if (conv.running) throw new Error('LocalPilot is already working in this tab. Stop it or wait.');
   const settings = { ...(await loadSettings()), ...settingsPatch };
   const run = new AgentRun({
@@ -141,6 +141,7 @@ async function startRun({ conv, tabId, prompt, emit, requestApproval, settingsPa
     persistApprovedDomains: (domains) => saveSettings({ approvedDomains: domains }),
   });
   run.ctx.panelTabId = panelTabId ?? tabId;
+  if (frontTab) run.ctx.exclusive = (fn) => withFrontTab(run.ctx, fn); // shares the MCP window: take turns
   if (task) run.ctx.task = { id: task.id, name: task.name, replaySteps: tasks.replayFor(task, extra) };
   if (task?.allowedDomains?.length) run.ctx.allowedDomains = task.allowedDomains;
   return run.run(prompt, cleanAttachments(files, conv.attachments));
@@ -189,6 +190,7 @@ async function runTaskInBackground(task, trigger = 'schedule') {
     tabId,
     prompt: task.prompt,
     task,
+    frontTab: true,
     settingsPatch: { permissionMode: current.permissionMode === 'auto' ? 'auto' : 'ask_site' },
     emit: (e) => {
       if (e.type === 'assistant') final = e.text;
