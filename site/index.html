@@ -7,7 +7,11 @@
 <meta name="description" content="A browser agent in Chrome's side panel, powered by your own local AI model. Your real browser, nothing leaves your machine, no account.">
 <meta property="og:title" content="LocalPilot: a browser agent that runs on your model">
 <meta property="og:description" content="Chrome side-panel agent for Ollama, LM Studio, llama.cpp, vLLM and any OpenAI/Anthropic-compatible server. Free, open source, no account.">
-<meta property="og:image" content="https://fawad1997.github.io/LocalPilot/docs/img/sidepanel.png">
+<meta property="og:image" content="https://fawad1997.github.io/LocalPilot/media/hero.jpg">
+<meta property="og:image:width" content="1920">
+<meta property="og:image:height" content="1080">
+<meta property="og:video" content="https://fawad1997.github.io/LocalPilot/media/hero.mp4">
+<meta property="og:video:type" content="video/mp4">
 <meta property="og:url" content="https://fawad1997.github.io/LocalPilot/">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="favicon.png">
@@ -217,19 +221,25 @@ dialog.lb button { position: fixed; top: 16px; right: 16px; background: rgba(255
       <p class="meta">Chrome 116+ and other Chromium browsers · the PC-bridge installer is Windows-only</p>
     </div>
     <div>
+<!--HERO-GIF-->
       <div class="frame">
         <div class="frame-bar"><i></i><i></i><i></i><span>books.toscrape.com · LocalPilot side panel</span></div>
         <div class="frame-media">
-<!--HERO-GIF-->
           <img src="examples/demo-ai/books.gif" alt="LocalPilot's AI opens the Travel category on books.toscrape.com and reads every price" width="1280" height="800">
-<!--/HERO-GIF-->
-<!--HERO-VIDEO
-          <video id="hero-video" src="media/hero.mp4" poster="media/hero.jpg" autoplay muted loop playsinline aria-label="LocalPilot product video"></video>
-          <button class="sound" id="sound" type="button">🔊 Tap for sound</button>
--->
         </div>
       </div>
       <p class="caption">Prompt: <b>“Find the cheapest book in the Travel category on this site.”</b> It answered £23.21, which is correct: 4 tool calls in 20 s.</p>
+<!--/HERO-GIF-->
+<!--HERO-VIDEO
+      <div class="frame">
+        <div class="frame-bar"><i></i><i></i><i></i><span>LocalPilot in 60 seconds</span></div>
+        <div class="frame-media">
+          <video id="hero-video" src="media/hero.mp4" poster="media/hero.jpg" autoplay muted loop playsinline preload="auto" width="1920" height="1080" aria-label="LocalPilot in 60 seconds: it finds the cheapest travel book, asks before acting, passes simple CAPTCHA checks, runs saved tasks on a schedule and tests websites"></video>
+          <button class="sound" id="sound" type="button">🔊 Tap for sound</button>
+        </div>
+      </div>
+      <p class="caption">The 60-second tour: <b>the cheapest-book run</b>, approvals and Stop, CAPTCHA checks with a human fallback, saved tasks that replay without the AI, and <code>/test</code>. <a href="media/hero.mp4">Download the video</a></p>
+-->
     </div>
   </div>
 </section>
@@ -275,9 +285,9 @@ dialog.lb button { position: fixed; top: 16px; right: 16px; background: rgba(255
     </div>
     <div class="grid g3" id="ex-grid">
 <!--VIDEO-CARD
-      <button class="ex" data-kind="ai" data-video="media/hero.mp4" data-caption="LocalPilot in under a minute.">
+      <button class="ex" data-kind="ai" data-video="media/hero.mp4" data-caption="LocalPilot in 60 seconds, with sound.">
         <div class="thumb"><video src="media/hero.mp4" poster="media/hero.jpg" muted loop playsinline preload="metadata" aria-hidden="true"></video></div>
-        <div class="body"><span class="tag">Video</span><h3>LocalPilot in under a minute</h3><p>The product tour.</p></div>
+        <div class="body"><span class="tag">Video</span><h3>LocalPilot in 60 seconds</h3><p>The whole tour: a real run, approvals, CAPTCHA checks, saved tasks and /test.</p></div>
       </button>
 -->
       <button class="ex" data-kind="ai" data-src="examples/demo-ai/books.gif" data-caption="“Find the cheapest book in the Travel category.” Answer: £23.21, correct. 4 tool calls, 20 s.">

@@ -1,16 +1,40 @@
 # LocalPilot
 
-**[Website](https://fawad1997.github.io/LocalPilot/)** · **A browser agent in Chrome's side panel, powered by a local AI model.**
+<a href="https://fawad1997.github.io/LocalPilot/"><img src="docs/img/tour-preview.gif" alt="LocalPilot at work: the task “Find the cheapest travel book” is typed into the side panel, Chrome browses books.toscrape.com, and the answer £23.21 appears" width="100%"></a>
 
-LocalPilot opens pages, reads them, clicks, types, fills forms, saves data to your PC and takes screenshots — while you watch in a side panel and approve what it does. The model runs **on your computer** (Ollama, LM Studio, llama.cpp, vLLM, LiteLLM, FreeLLMAPI, or any OpenAI/Anthropic-compatible server), so pages and chats do not go to a cloud account. There is no account, no subscription and no telemetry.
+**A browser agent in Chrome's side panel, powered by an AI model on your own PC.** LocalPilot opens pages, reads them, clicks, types, fills forms, saves data to your PC and takes screenshots, while you watch and approve what it does. The model runs **on your computer** (Ollama, LM Studio, llama.cpp, vLLM, LiteLLM, FreeLLMAPI, or any OpenAI/Anthropic-compatible server), so pages and chats never go to a cloud account.
 
-Neither Claude in Chrome (which forbids it) nor Browser Use's local library includes an **opt-in CAPTCHA solver that runs in your own browser** — Cloudflare Turnstile, "verify you are human", reCAPTCHA/hCaptcha checkboxes, sliders and press-and-hold — while still handing the tab back to you when a check needs a human.
+**[▶ Watch the 60-second tour, with sound](https://fawad1997.github.io/LocalPilot/)** · **[Install in 3 steps](#quick-start)**
 
-![LocalPilot's AI finds the cheapest travel book on a real website](examples/demo-ai/books.gif)
+- **Your real Chrome:** your logins, cookies and tabs; no account, no subscription, no telemetry
+- **You stay in control:** it asks before acting on a new site, and you can stop it at any time
+- **Opt-in CAPTCHA solver** that runs in your own browser and hands the tab to you when a check needs a person ([tested sites](docs/CAPTCHA.md))
+- **Saved tasks on a schedule** that replay their steps without the AI, and notify you when the result changes
+- **`/test`** writes a bug report for any site; **`/record`** saves a captioned GIF of a task
+- **Works with Claude Code** through an MCP server, with its own tab for each session
+- **Status:** 0.10.0 · unpacked extension for Chrome 116+ (Chromium browsers work too) · the PC-bridge installer is Windows-only
 
-*LocalPilot answering “Find the cheapest book in the Travel category on this site” on books.toscrape.com. It answered £23.21 — correct.*
+## Contents
 
-**Status:** 0.10.0 · unpacked extension for Chrome 116+ (Chromium-based browsers work too) · the one-step PC-bridge installer is Windows-only; the extension itself runs on any desktop Chrome.
+- [See it work](#see-it-work)
+- [Why LocalPilot](#why-localpilot)
+- [Quick start](#quick-start)
+- [What it can do](#what-it-can-do)
+- [CAPTCHA checks](#captcha-checks)
+- [How LocalPilot compares](#how-localpilot-compares)
+- [Privacy and security](#privacy-and-security)
+- [Limitations](#limitations-honest-list)
+- [Documentation](#documentation) · [Development](#development) · [License](#license)
+
+## See it work
+
+Every clip was recorded by LocalPilot itself, on real websites. More runs, reports and spreadsheets are in [examples/](examples/README.md).
+
+<table>
+<tr><td width="33%" valign="top"><a href="examples/demo-ai/books.md"><img src="examples/demo-ai/books.gif" alt="LocalPilot's AI opens the Travel category on books.toscrape.com and reads every price" width="100%"></a><br><b>“Find the cheapest travel book.”</b><br>Answered £23.21, the lowest of 11 prices.<br><sub>AI agent · 4 tool calls · 20 s</sub></td><td width="33%" valign="top"><a href="examples/demo-ai/form.md"><img src="examples/demo-ai/form.gif" alt="LocalPilot's AI fills a pizza order form and stops before submitting" width="100%"></a><br><b>“Fill this form, but do not submit.”</b><br>Every field filled, then it stopped for review.<br><sub>AI agent · 8 tool calls · 21 s</sub></td><td width="33%" valign="top"><a href="examples/demo-ai/wikipedia.md"><img src="examples/demo-ai/wikipedia.gif" alt="LocalPilot's AI searches Wikipedia for the first web browser" width="100%"></a><br><b>“Who made the first web browser?”</b><br>WorldWideWeb, Tim Berners-Lee, 1990.<br><sub>AI agent · 10 tool calls · 52 s</sub></td></tr>
+<tr><td width="33%" valign="top"><a href="examples/demo-ai/bugs.md"><img src="examples/demo-ai/bugs.gif" alt="LocalPilot's AI tests a page with broken images and explains the problems" width="100%"></a><br><b>“Test this site and explain the bugs.”</b><br>Two broken images, a failing request, missing alt text, each with a fix.<br><sub>AI agent · /test</sub></td><td width="33%" valign="top"><a href="examples/README.md#2-testing-real-websites-for-bugs"><img src="examples/real/w3c-test.gif" alt="Testing W3C's inaccessible demo site, with problems outlined in red" width="100%"></a><br><b>W3C's “inaccessible” demo site</b><br>103 images without alt text, unlabeled fields, no viewport tag.<br><sub>/test · 4 pages · report + GIF</sub></td><td width="33%" valign="top"><a href="examples/README.md#4-every-check-at-once-a-shop-with-bugs-on-purpose"><img src="examples/demo/buggy-shop-test.gif" alt="Testing a demo shop with one of each bug planted" width="100%"></a><br><b>A shop with bugs on purpose</b><br>“Price: undefined”, €NaN, a 503 API, a script crash: all found.<br><sub>/test · 9 errors · 4 warnings</sub></td></tr>
+<tr><td width="33%" valign="top"><a href="examples/README.md#3-recordings-what-happened-step-by-step"><img src="examples/real/wikipedia-search.gif" alt="Searching Wikipedia and jumping to the History section" width="100%"></a><br><b>Search Wikipedia</b><br>Type, open the article, jump to a section.<br><sub>/record · captioned GIF</sub></td><td width="33%" valign="top"><a href="examples/README.md#3-recordings-what-happened-step-by-step"><img src="examples/real/pizza-form.gif" alt="Filling a pizza order form, with a red circle on every click" width="100%"></a><br><b>Fill a form</b><br>Every field and checkbox, a red circle on each click.<br><sub>/record · not submitted</sub></td><td width="33%" valign="top"><a href="examples/real/quotes.csv"><img src="examples/real/quotes-pages.gif" alt="Reading three pages of quotes into a spreadsheet" width="100%"></a><br><b>Three pages to a spreadsheet</b><br>Followed “Next” and saved 30 quotes with authors and tags.<br><sub>extract_list · CSV</sub></td></tr>
+</table>
 
 ---
 
@@ -76,7 +100,7 @@ Then try: *“Find the contact link and open it.”* · *“Fill this form with 
 | **Test a website** | `/test` crawls the site read-only, checks for JS errors, broken links, unlabeled fields, tiny phone layouts and slow pages, then writes a report with screenshots and a GIF. |
 | **Record** | `/record …` saves a captioned GIF of the task, with a red circle on every click. |
 | **Schedule** | Save a task and run it daily, weekly, every N minutes, or as a page watch that notifies you when something changes. |
-| **Drive it from Claude Code** | The MCP server exposes the same browser tools to an MCP client, in its own unfocused window. |
+| **Drive it from Claude Code** | The MCP server exposes the same browser tools to Claude Code. Each session gets its own tab in one unfocused window, so sessions never take over each other's tabs, or yours. |
 | **CAPTCHA checks** | Optional local solver for click-based checks; hands over to you when it cannot pass. [Details →](docs/CAPTCHA.md) |
 
 The complete tool list, every setting and the internals are in [docs/REFERENCE.md](docs/REFERENCE.md).
@@ -170,6 +194,7 @@ npm run test:all     # every end-to-end suite (loads the extension in Chromium)
 npm run test:e2e:captcha  # the CAPTCHA end-to-end suite
 npm run demo         # remakes examples/demo
 npm run demo:ai      # remakes examples/demo-ai with your configured model
+node scripts/make-readme-preview.mjs   # remakes the README preview from site/media/hero.mp4
 ```
 
 Project layout, design notes and the full test list are in [docs/REFERENCE.md](docs/REFERENCE.md#layout).
