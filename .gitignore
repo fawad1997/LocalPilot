@@ -31,4 +31,4 @@ tests/*.png
 bench/.venv/
 bench/results/
 bench/__pycache__/
-_site/
+.site-build/

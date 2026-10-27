@@ -1,4 +1,4 @@
-// Builds the GitHub Pages site into _site/: site/ plus the demo media it links to, copied
+// Builds the GitHub Pages site into .site-build/: site/ plus the demo media it links to, copied
 // at their repo paths so the GIFs live in git only once. When site/media/hero.mp4 exists,
 // the hero swaps the demo GIF for the video. Used by .github/workflows/pages.yml.
 import fs from 'node:fs';
@@ -6,10 +6,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const out = path.join(root, '_site');
+const out = path.join(root, '.site-build');
 const MEDIA = /\.(gif|png|jpe?g|webp|mp4|webm)$/i;
 
-// Empty rather than delete _site/: on Windows a preview server running inside it locks the folder.
+// Empty rather than delete .site-build/: on Windows a preview server running inside it locks the folder.
 fs.mkdirSync(out, { recursive: true });
 for (const name of fs.readdirSync(out)) fs.rmSync(path.join(out, name), { recursive: true, force: true });
 fs.cpSync(path.join(root, 'site'), out, { recursive: true });
