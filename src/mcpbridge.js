@@ -1,11 +1,12 @@
 // MCP bridge, extension side. The native host relays tool calls from MCP clients
 // (Claude Code via host/mcp-server.mjs). They run in a dedicated, unfocused
-// "LocalPilot MCP" window, so they never take over the window or tabs you use.
+// "LocalPilot MCP" window (see mcpwindow.js), so they never take over the window or tabs you use.
 import * as pc from './pcbridge.js';
 import * as cdp from './cdp.js';
 import { loadSettings, saveSettings } from './settings.js';
 import { toolDefinitions, runTool, setIndicator } from './tools.js';
 import { log } from './logger.js';
+import { openMcpTab, addToGroup } from './mcpwindow.js';
 import { mcpHiddenRecipes } from './recipes/index.js';
 import { ALWAYS_ASK_TOOLS } from './quantara.js';
 
@@ -13,7 +14,6 @@ import { ALWAYS_ASK_TOOLS } from './quantara.js';
 // quantara_halt is confirmed in the panel only.
 const EXCLUDED = new Set(['pc_list_dir', 'pc_read_file', 'pc_write_file', 'pc_write_csv', 'pc_run_script', ...mcpHiddenRecipes(), ...ALWAYS_ASK_TOOLS]);
 const IDLE_RELEASE_MS = 5 * 60 * 1000;
-const GROUP_TITLE = 'LocalPilot MCP';
 
 const OWN_TAB_ID = new Set(['switch_tab', 'tabs_close']);
 const TAB_ID_PROP = {
@@ -30,18 +30,6 @@ const state = {
   current: null, // { callId, cancel }
   cancelledIds: new Set(),
 };
-
-async function mcpWindow() {
-  if (state.windowId != null) {
-    const win = await chrome.windows.get(state.windowId, { populate: true }).catch(() => null);
-    if (win) return win;
-  }
-  // Unfocused, normal-state window: it renders (unlike minimized ones) without stealing focus.
-  const win = await chrome.windows.create({ url: 'about:blank', focused: false, state: 'normal', width: 1280, height: 900 });
-  state.windowId = win.id;
-  log('mcp_window_created', { windowId: win.id });
-  return chrome.windows.get(win.id, { populate: true });
-}
 
 async function mcpCtx(settings) {
   if (!state.ctx) {
@@ -65,24 +53,12 @@ async function mcpCtx(settings) {
   ctx.host = state.host;
   const alive = ctx.tabId != null && (await chrome.tabs.get(ctx.tabId).catch(() => null));
   if (!alive) {
-    const win = await mcpWindow();
-    ctx.windowId = win.id;
-    ctx.tabId = win.tabs[0].id;
+    const tab = await openMcpTab({ reuseIdle: true });
+    ctx.windowId = tab.windowId;
+    ctx.tabId = tab.tabId;
     ctx.screenshotScale = null;
-    await addToGroup(ctx.tabId);
   }
   return ctx;
-}
-
-async function addToGroup(tabId) {
-  try {
-    const tab = await chrome.tabs.get(tabId);
-    const groups = await chrome.tabGroups.query({ title: GROUP_TITLE, windowId: tab.windowId });
-    const groupId = await chrome.tabs.group({ tabIds: [tabId], ...(groups[0] ? { groupId: groups[0].id } : { createProperties: { windowId: tab.windowId } }) });
-    if (!groups[0]) await chrome.tabGroups.update(groupId, { title: GROUP_TITLE, color: 'purple' });
-  } catch {
-    // Grouping is cosmetic.
-  }
 }
 
 function toMcpContent(blocks) {
@@ -98,7 +74,8 @@ function retainTab(tabId) {
 function scheduleRelease(ctx) {
   clearTimeout(state.idleTimer);
   state.idleTimer = setTimeout(async () => {
-    await setIndicator(ctx.tabId, false);
+    // every tab used in this session, not just the last: a "tab_id" call can leave the frame on another tab
+    for (const id of new Set([ctx.tabId, ...state.retained])) await setIndicator(id, false);
     for (const id of state.retained) await cdp.release(id);
     state.retained.clear();
   }, IDLE_RELEASE_MS);
@@ -127,6 +104,7 @@ async function handleCall(msg) {
       const tab = await chrome.tabs.get(Number(tabId)).catch(() => null);
       if (!tab) throw new Error(`No tab with id ${tabId}. Call tabs_context to list tabs.`);
       if (tab.id !== ctx.tabId) {
+        await setIndicator(ctx.tabId, false); // or the frame stays on the old tab (it did on the shop TV's menu)
         ctx.tabId = tab.id;
         ctx.screenshotScale = null;
       }

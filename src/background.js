@@ -9,6 +9,7 @@ import { runTool, callPage } from './tools.js';
 import { detectBotCheck } from './botcheck.js';
 import { detach as cdpDetach, isAttached as cdpIsAttached, retain as cdpRetain } from './cdp.js';
 import * as tasks from './tasks.js';
+import { openMcpTab } from './mcpwindow.js';
 import { resolveApplication, pendingApplications } from './recipes/apply.js';
 
 const testCtx = new Map();
@@ -158,7 +159,7 @@ function waitTabComplete(tabId, timeoutMs = 20000) {
 }
 
 // ---------------------------------------------------------------------------
-// Saved tasks on a schedule: run in their own unfocused window, ask nothing (only sites
+// Saved tasks on a schedule: run in the shared unfocused LocalPilot MCP window (one tab each), ask nothing (only sites
 // already approved with "Always allow" work), notify when done.
 
 const sentNotifications = []; // for tests
@@ -173,8 +174,7 @@ async function notify(id, title, message) {
 async function runTaskInBackground(task, trigger = 'schedule') {
   const startedAt = new Date().toISOString();
   log('task_start', { taskId: task.id, name: task.name, trigger });
-  const win = await chrome.windows.create({ url: task.url || 'about:blank', focused: false, state: 'normal', width: 1280, height: 900 });
-  const tabId = win.tabs[0].id;
+  const { tabId, windowId } = await openMcpTab({ url: task.url || 'about:blank', group: false });
   if (task.url) await waitTabComplete(tabId);
   const conv = new Conversation();
   conv.ports = new Set();
@@ -218,8 +218,8 @@ async function runTaskInBackground(task, trigger = 'schedule') {
   await tasks.recordRun(task.id, run);
   const notified = await notifyRun(task, run, prev);
   log('task_end', { taskId: task.id, ok, reason: done?.reason, notified, text: text.slice(0, 300) });
-  if (ok) await chrome.windows.remove(win.id).catch(() => {});
-  return { ok, text, notified, windowId: win.id, windowClosed: ok };
+  if (ok) await chrome.tabs.remove(tabId).catch(() => {});
+  return { ok, text, notified, windowId, windowClosed: ok };
 }
 
 // Sends the desktop notification unless the task only wants changes / a keyword and this run has none.
@@ -235,8 +235,7 @@ async function notifyRun(task, run, prev) {
 async function runWatchInBackground(task, trigger = 'schedule') {
   const startedAt = new Date().toISOString();
   log('task_start', { taskId: task.id, name: task.name, trigger, watch: true });
-  const win = await chrome.windows.create({ url: task.url, focused: false, state: 'normal', width: 1280, height: 900 });
-  const tabId = win.tabs[0].id;
+  const { tabId, windowId } = await openMcpTab({ url: task.url, group: false });
   let ok = false;
   let snapshot = '';
   let text = '';
@@ -263,8 +262,8 @@ async function runWatchInBackground(task, trigger = 'schedule') {
   await tasks.recordRun(task.id, run);
   const notified = await notifyRun(task, run, prev);
   log('task_end', { taskId: task.id, ok, watch: true, notified, text: text.slice(0, 300) });
-  if (ok) await chrome.windows.remove(win.id).catch(() => {});
-  return { ok, text, notified, windowId: win.id, windowClosed: ok };
+  if (ok) await chrome.tabs.remove(tabId).catch(() => {});
+  return { ok, text, notified, windowId, windowClosed: ok };
 }
 
 async function onTaskAlarm(alarm) {
